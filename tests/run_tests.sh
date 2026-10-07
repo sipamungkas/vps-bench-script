@@ -422,6 +422,31 @@ eq "tanpa --slug tetap jalan" "$?" "0"
 eq "tanpa --slug diperingatkan" "$(printf '%s' "$out" | grep -c 'tanpa --slug')" "1"
 
 # ---------------------------------------------------------------------------
+section "interaktif: host ditanyakan lewat /dev/tty"
+# stdin saat `curl | bash -s` berisi skripnya sendiri, jadi host harus dibaca
+# dari /dev/tty. Kalau tidak, `read` akan menelan sisa baris skrip.
+# Diuji lewat pty sungguhan supaya perilakunya sama dengan pemakaian nyata.
+eq "utilitas pty tersedia" "$(command -v script >/dev/null 2>&1 && echo ya || echo tidak)" "ya"
+if command -v script >/dev/null 2>&1; then
+    rm -rf "$WORK/ia2"
+    out="$( (printf 'root@127.0.0.1\n'; sleep 2) |
+        VBENCH_LIB_DIR="$ROOT/tools/lib" script -q /dev/null \
+            bash -c "cat \"$SA\" | bash -s -- --skip-yabs --skip-bench -o \"$WORK/ia2\"" \
+            2>&1 )"
+    # pty ikut mengecho ketikan, jadi yang dicek hanya prompt-nya muncul
+    eq "prompt tty tampil" "$(printf '%s' "$out" | grep -c 'alias ssh atau user@ip')" "1"
+    eq "slug jadi root-127.0.0.1" \
+        "$(ls "$WORK"/ia2/root-127.0.0.1/*/root-127.0.0.1.json 2>/dev/null | wc -l | tr -d ' ')" "1"
+
+    # tanpa tty (cron/CI) harus gagal dengan pesan yang jelas, bukan hang
+    out="$(VBENCH_LIB_DIR="$ROOT/tools/lib" bash "$SA" -o "$WORK/ia3" </dev/null 2>&1)"
+    eq "tanpa tty gagal dengan pesan jelas" \
+        "$(printf '%s' "$out" | grep -c 'perlu nama host')" "1"
+    eq "tanpa tty tidak bocor error tty" \
+        "$(printf '%s' "$out" | grep -c 'Device not configured')" "0"
+fi
+
+# ---------------------------------------------------------------------------
 section "folder keluaran tidak saling menimpa"
 for i in 1 2; do
     "$BIN" bench-parse "$TESTS_DIR/fixture-bench.txt" -o "$WORK/coll" >/dev/null 2>&1

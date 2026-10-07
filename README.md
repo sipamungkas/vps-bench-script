@@ -11,16 +11,17 @@ pada repo situs. Isi `tools/` dan `tests/` di sini identik dengan yang ada di
 ## Mulai cepat
 
 Jalankan YABS.sh lalu bench.sh di satu host, dan dapatkan JSON + laporan
-Markdown. Tidak perlu clone repo:
+Markdown. Tidak perlu clone repo, tidak perlu flag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-  | bash -s -- vps-saya --slug nevacloud-nvme-jkt
+curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone | bash -s
 ```
 
-Itu saja. Metadata paket (harga, lokasi, provider, link affiliate, tag)
-sengaja tidak ada di perintah — kolomnya kosong di JSON, diisi manual nanti.
-Hasil benchmark-nya sendiri sudah lengkap.
+Skrip menanyakan nama host, lalu menurunkannya jadi slug
+(`root@103.28.14.52` → `root-103.28.14.52`). Nama metadata paket (harga,
+lokasi, provider, link affiliate, tag) sengaja tidak ada di mana pun —
+kolomnya kosong di JSON, diisi manual nanti. Hasil benchmark-nya sendiri
+sudah lengkap.
 
 Butuh di komputer lokal: `bash`, `jq`, `curl`, `ssh`.
 Butuh di server: `curl` dan `bash` (YABS.sh mengunduh dependensinya sendiri).
@@ -52,6 +53,12 @@ Kalau metadata memang mau diisi sekalian lewat perintah, flag-nya tetap ada
 (`--title`, `--provider`, `--price`, `--tag`, ...). Lihat tabel di bawah.
 
 ## Opsi
+
+Host ditulis sebagai argumen kalau tidak mau ditanyakan:
+
+```bash
+curl -fsSL <url> | bash -s -- vps-saya
+```
 
 | Opsi | Fungsi |
 |---|---|
@@ -129,7 +136,7 @@ tools/vps-bench-standalone    Entry point untuk curl | bash
 tools/lib/bench_parse.sh      Parser YABS.sh dan bench.sh
 tools/lib/astro_data.sh       Menyusun JSON sumber data situs
 tools/lib/bench_render.sh     Render JSON menjadi Markdown (incl. laporan gabungan VPS)
-tests/run_tests.sh            188 regression test
+tests/run_tests.sh            193 regression test
 tests/fixture-*               Contoh output asli, untuk menangkap regresi format lama
 ```
 
@@ -139,7 +146,7 @@ tests/fixture-*               Contoh output asli, untuk menangkap regresi format
 bash tests/run_tests.sh
 ```
 
-188 assertion, tidak perlu akses server maupun menjalankan Astro. Fixture
+193 assertion, tidak perlu akses server maupun menjalankan Astro. Fixture
 `tests/fixture-*-legacy.txt` berasal dari output **nyata** VPS supaya regresi
 format lama (v2024/v2025) langsung ketahuan — nama label, satuan, dan format
 IOPS di script itu berubah beberapa kali.

@@ -2,11 +2,12 @@
 # vps-bench-standalone - jalankan benchmark VPS dari mana saja, lalu tulis
 # JSON + Markdown yang siap disalin ke repo.
 #
-# Dirancang untuk dipanggil tanpa clone repo, dan tanpa metadata yang panjang:
+# Dirancang untuk dipanggil tanpa clone repo, tanpa flag, dan tanpa clone:
 #
 #   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-#     | bash -s -- <host> --slug <slug>
+#     | bash -s
 #
+# Skrip menanyakan nama host lewat /dev/tty, lalu menurunkannya jadi slug.
 # Metadata paket (harga, lokasi, provider, affiliate, tag) sengaja tidak
 # diminta di perintah. Hasilnya tetap valid; kolomnya kosong untuk diisi manual.
 #
@@ -49,10 +50,15 @@ vps-bench-standalone - benchmark VPS lalu tulis JSON + Markdown
 
 PAKAI
   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-    | bash -s -- <host> --slug <slug>
+    | bash -s
 
-  Itu saja. Metadata paket (harga, lokasi, provider, link, tag) sengaja
-  tidak ada di perintah - semua kolom kosong, nanti diisi manual di JSON.
+  Lalu skrip menanyakan nama host. Selesai - tanpa flag apa pun.
+  Nama slug diturunkan dari host (root@103.28.14.52 -> root-103.28.14.52),
+  nama metadata (harga, lokasi, provider, link, tag) sengaja tidak ada di
+  perintah: semua kolom kosong, nanti diisi manual di JSON.
+
+  Kalau tidak mau ditanyakan, host boleh ditulis sebagai argumen:
+    curl -fsSL <url> | bash -s -- vps-saya
 
 YANG DIJALANKAN
   <host>  YABS.sh  lalu  bench.sh, berurutan. Total 20-35 menit.
@@ -126,6 +132,10 @@ OUT_DIR="${BENCH_RESULT_DIR:-$PWD/bench-results}"
 skip_yabs=0
 skip_bench=0
 parse_only=""
+# `set -u` aktif, dan jalur SSH tidak pernah mengisinya. Tanpa ini, jalur
+# interaktif (yang baru saja ditambahkan) langsung berhenti di baris pertama
+# yang menyentuh variabel ini.
+parse_src=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -159,6 +169,35 @@ while [[ $# -gt 0 ]]; do
             host="$1"; shift ;;
     esac
 done
+
+# Tanya lewat terminal, bukan stdin. Kalau skrip dipanggil dengan
+# `curl ... | bash -s`, stdin berisi skripnya sendiri, jadi `read` dari stdin
+# bisa menelan sisa baris skrip dan berhenti sebelum apa pun dijalankan.
+hex_tanya() {
+    local prompt="$1" jawab=""
+    # `[[ -r /dev/tty ]]` benar tapi Device not configured tetap bisa terjadi
+    # (mis. cron, CI, atau pipeline yang tidak punya terminal), jadi error-nya
+    # ditahan. Tanpa itu, dua baris "Device not configured" bocor ke stderr
+    # sebelum pesan errornya sendiri.
+    if { : >/dev/tty; } 2>/dev/null; then
+        printf '%s' "$prompt" >/dev/tty 2>/dev/null || return 0
+        IFS= read -r jawab </dev/tty 2>/dev/null || true
+    fi
+    printf '%s' "$jawab"
+}
+
+# Perintah tanpa argumen sama sekali harus tetap bisa jalan, jadi host
+# ditanyakan di terminal dan slug diturunkan dari host itu.
+if [[ -z "$host" && -z "$parse_only" ]]; then
+    host="$(hex_tanya '  host (alias ssh atau user@ip): ')"
+    [[ -n "$host" ]] || die "perlu nama host, tapi tidak terbaca dari terminal.
+       Kalau terminal tidak interaktif, tulis host-nya sebagai argumen:
+       curl -fsSL <url> | bash -s -- user@ip"
+    # sisa spasi dari prompt bisa ikut terbaca kalau user-nya malas menekan
+    # spasi sebelum mengetik nama host
+    host="${host#"${host%%[![:space:]]*}"}"
+    host="${host%"${host##*[![:space:]]}"}"
+fi
 
 need jq
 need curl
