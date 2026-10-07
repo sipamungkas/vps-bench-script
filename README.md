@@ -10,22 +10,17 @@ pada repo situs. Isi `tools/` dan `tests/` di sini identik dengan yang ada di
 
 ## Mulai cepat
 
-Jalankan YABS.sh lalu bench.sh di satu host, dan dapatkan JSON siap-salin.
-Tidak perlu clone repo:
+Jalankan YABS.sh lalu bench.sh di satu host, dan dapatkan JSON + laporan
+Markdown. Tidak perlu clone repo:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-  | bash -s -- vps-saya \
-      --slug nevacloud-nvme-jkt \
-      --title "Nevacloud NVMe Jakarta" \
-      --provider "Nevacloud (PT Deneva)" \
-      --location "Jakarta, Indonesia" \
-      --price 90000 --currency IDR \
-      --cpu-cores 1 --ram-gb 1 --storage-gb 20 --storage-type NVMe \
-      --bandwidth-tb 1 --virtualization KVM --status Available \
-      --affiliate https://yukcek.com/nevacloud \
-      --tag KVM --tag Jakarta
+  | bash -s -- vps-saya --slug nevacloud-nvme-jkt
 ```
+
+Itu saja. Metadata paket (harga, lokasi, provider, link affiliate, tag)
+sengaja tidak ada di perintah — kolomnya kosong di JSON, diisi manual nanti.
+Hasil benchmark-nya sendiri sudah lengkap.
 
 Butuh di komputer lokal: `bash`, `jq`, `curl`, `ssh`.
 Butuh di server: `curl` dan `bash` (YABS.sh mengunduh dependensinya sendiri).
@@ -37,18 +32,14 @@ tidak saling berebut CPU dan skewanya mengacaukan angka.
 
 | Ke mana | Isi |
 |---|---|
-| stdout | JSON final, persis format `src/data/vps/<slug>.json` |
-| stderr | progres, lokasi berkas, dan perintah `cp` siap pakai |
-| `./bench-results/<slug>/<stempel>/` | `yabs.txt`, `benchsh.txt`, `<slug>.json` |
+| `./bench-results/<slug>/<stempel>/<slug>.json` | data untuk `src/data/vps/` |
+| `./bench-results/<slug>/<stempel>/<slug>.md` | laporan gabungan: paket, ringkasan, YABS (termasuk iperf3), bench.sh (termasuk speedtest.net) |
+| `./bench-results/<slug>/<stempel>/yabs.txt` `benchsh.txt` | output mentah |
+| stdout | ringkasan singkat + lokasi berkas |
+| stderr | progres dan perintah `cp` siap pakai |
 
-Jadi stdout bisa langsung diarahkan ke berkas:
-
-```bash
-curl -fsSL <raw>/tools/vps-bench-standalone | bash -s -- vps-saya --slug ... > plan.json
-```
-
-Repo `astro-vps-bench` yang aktif tidak pernah disentuh, jadi JSON-nya
-disalin manual:
+stdout sengaja bukan JSON, supaya tidak pernah ter-redirect ke `.json` berisi
+teks. Repo `astro-vps-bench` yang aktif juga tidak pernah disentuh:
 
 ```bash
 cp bench-results/<slug>/<stempel>/<slug>.json  src/data/vps/
@@ -57,35 +48,31 @@ cp bench-results/<slug>/<stempel>/{yabs,benchsh}.txt src/data/raw/<slug>/
 pnpm build
 ```
 
+Kalau metadata memang mau diisi sekalian lewat perintah, flag-nya tetap ada
+(`--title`, `--provider`, `--price`, `--tag`, ...). Lihat tabel di bawah.
+
 ## Opsi
 
 | Opsi | Fungsi |
 |---|---|
-| `--slug <s>` | Wajib. Nama file JSON |
-| `--title <teks>` | Nama paket yang tampil |
-| `--provider <nama>` | `"Nama (Badan Usaha)"` otomatis dipecah jadi 2 field |
-| `--location <teks>` | mis. `"Jakarta, Indonesia"` |
-| `--price` `--currency` | Harga bulanan, mis. `90000` dan `IDR` |
-| `--cpu-cores` `--ram-gb` `--storage-gb` `--bandwidth-tb` | Spesifikasi |
-| `--storage-type` `--virtualization` `--status` | mis. `NVMe`, `KVM`, `Available` |
-| `--affiliate <url>` | Link referral |
-| `--tag <teks>` | Bisa diulang |
-| `-o <dir>` | Folder keluaran (default `./bench-results`) |
-| `--skip-yabs` / `--skip-bench` | Jangan jalankan salah satunya |
+| `--slug <s>` | Nama file JSON. Kalau kosong, diturunkan dari nama host |
 | `--only-parse <dir>` | Pakai berkas mentah yang sudah ada, tanpa SSH |
+| `--skip-yabs` / `--skip-bench` | Jangan jalankan salah satunya |
+| `-o <dir>` | Folder keluaran (default `./bench-results`) |
 
-Metadata juga bisa lewat env supaya perintahnya pendek:
-`VBENCH_SLUG`, `VBENCH_TITLE`, `VBENCH_PROVIDER`, `VBENCH_LOCATION`,
-`VBENCH_PRICE`, `VBENCH_CURRENCY`, `VBENCH_CPU_CORES`, `VBENCH_RAM_GB`,
-`VBENCH_STORAGE_GB`, `VBENCH_STORAGE_TYPE`, `VBENCH_BANDWIDTH_TB`,
-`VBENCH_VIRTUALIZATION`, `VBENCH_STATUS`, `VBENCH_AFFILIATE`,
-`VBENCH_LAST_UPDATED`.
+Metadata opsional: `--title`, `--provider`, `--location`, `--price`,
+`--currency`, `--cpu-cores`, `--ram-gb`, `--storage-gb`, `--bandwidth-tb`,
+`--storage-type`, `--virtualization`, `--status`, `--affiliate`,
+`--last-updated`, dan `--tag` (bisa diulang). Semua juga bisa lewat env:
+`VBENCH_TITLE`, `VBENCH_PROVIDER`, `VBENCH_LOCATION`, `VBENCH_PRICE`,
+`VBENCH_CURRENCY`, `VBENCH_CPU_CORES`, `VBENCH_RAM_GB`, `VBENCH_STORAGE_GB`,
+`VBENCH_STORAGE_TYPE`, `VBENCH_BANDWIDTH_TB`, `VBENCH_VIRTUALIZATION`,
+`VBENCH_STATUS`, `VBENCH_AFFILIATE`, `VBENCH_LAST_UPDATED`.
 
-Kalau output YABS-nya sudah ada di komputer lokal, tidak perlu SSH lagi:
+Kalau output mentahnya sudah ada di komputer lokal, tidak perlu SSH lagi:
 
 ```bash
-./tools/vps-bench-standalone --only-parse <folder> --slug <slug> --title <t> \
-  --provider <p> --location <l>
+./tools/vps-bench-standalone --only-parse <folder> --slug <slug>
 ```
 
 ## Kenapa parser-nya tidak ditulis ulang di skrip standalone
@@ -141,8 +128,8 @@ tools/vps-bench               CLI multi-perintah
 tools/vps-bench-standalone    Entry point untuk curl | bash
 tools/lib/bench_parse.sh      Parser YABS.sh dan bench.sh
 tools/lib/astro_data.sh       Menyusun JSON sumber data situs
-tools/lib/bench_render.sh     Render JSON menjadi Markdown
-tests/run_tests.sh            164 regression test
+tools/lib/bench_render.sh     Render JSON menjadi Markdown (incl. laporan gabungan VPS)
+tests/run_tests.sh            188 regression test
 tests/fixture-*               Contoh output asli, untuk menangkap regresi format lama
 ```
 
@@ -152,7 +139,7 @@ tests/fixture-*               Contoh output asli, untuk menangkap regresi format
 bash tests/run_tests.sh
 ```
 
-164 assertion, tidak perlu akses server maupun menjalankan Astro. Fixture
+188 assertion, tidak perlu akses server maupun menjalankan Astro. Fixture
 `tests/fixture-*-legacy.txt` berasal dari output **nyata** VPS supaya regresi
 format lama (v2024/v2025) langsung ketahuan — nama label, satuan, dan format
 IOPS di script itu berubah beberapa kali.

@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# vps-bench-standalone - jalankan benchmark VPS dari mana saja, lalu cetak
-# JSON yang siap disalin ke src/data/vps/<slug>.json
+# vps-bench-standalone - jalankan benchmark VPS dari mana saja, lalu tulis
+# JSON + Markdown yang siap disalin ke repo.
 #
-# Dirancang untuk dipanggil tanpa clone repo:
+# Dirancang untuk dipanggil tanpa clone repo, dan tanpa metadata yang panjang:
 #
 #   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-#     | bash -s -- <host> --slug <slug> --title <judul> --provider <nama> [opsi]
+#     | bash -s -- <host> --slug <slug>
+#
+# Metadata paket (harga, lokasi, provider, affiliate, tag) sengaja tidak
+# diminta di perintah. Hasilnya tetap valid; kolomnya kosong untuk diisi manual.
 #
 # Keluarannya:
-#   stdout  JSON final, persis format src/data/vps/<slug>.json
-#   stderr  progres, lokasi file mentah, dan perintah untuk menyalin
-#   folder  ./bench-results/<slug>/<stempel>/ berisi yabs.txt, benchsh.txt, <slug>.json
+#   stdout  ringkasan singkat + lokasi berkas
+#   stderr  progres, lokasi file, dan perintah untuk menyalin
+#   folder  ./bench-results/<slug>/<stempel>/ berisi
+#             <slug>.json  data untuk src/data/vps/
+#             <slug>.md    laporan gabungan YABS + bench.sh
+#             yabs.txt, benchsh.txt
 #
 # Parsers TIDAK ditulis ulang di sini. Berkas ini hanya mengunduh
 # tools/lib/*.sh dari repo lalu mem-`-source`-nya, sehingga hanya ada satu
@@ -39,34 +45,39 @@ need() { command -v "$1" >/dev/null 2>&1 || die "butuh '$1' tapi tidak ditemukan
 
 usage() {
     cat >&2 <<'EOF'
-vps-bench-standalone - benchmark VPS lalu cetak JSON siap-import
+vps-bench-standalone - benchmark VPS lalu tulis JSON + Markdown
 
 PAKAI
   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-    | bash -s -- <host> --slug <slug> --title <judul> [opsi]
+    | bash -s -- <host> --slug <slug>
+
+  Itu saja. Metadata paket (harga, lokasi, provider, link, tag) sengaja
+  tidak ada di perintah - semua kolom kosong, nanti diisi manual di JSON.
 
 YANG DIJALANKAN
   <host>  YABS.sh  lalu  bench.sh, berurutan. Total 20-35 menit.
           Paket akan ikut terunduh di server, jadi butuh curl + bash di sana.
 
-METADATA (boleh lewat flag atau env)
-  --slug <s>          Wajib. Nama file JSON, mis. nevacloud-nvme-jkt
-  --title <teks>      Nama paket yang tampil, mis. "Nevacloud NVMe Jakarta"
-  --provider <nama>   "Nama (Badan Usaha)" otomatis dipecah jadi 2 field
-  --location <teks>   mis. "Jakarta, Indonesia"
-  --price <angka>     Harga bulanan
-  --currency <kode>   IDR | USD | AUD
-  --cpu-cores <n> --ram-gb <n> --storage-gb <n> --bandwidth-tb <n>
-  --storage-type <s> --virtualization <s> --status <s>
-  --affiliate <url>   Link referral
-  --last-updated <Y-m-d>
-  --tag <teks>        Bisa diulang
+KELUARAN
+  ./bench-results/<slug>/<stempel>/
+      <slug>.json   data untuk src/data/vps/
+      <slug>.md     laporan gabungan: paket, ringkasan, YABS, bench.sh
+                    (termasuk iperf3 dan speedtest.net)
+      yabs.txt      output mentah
+      benchsh.txt   output mentah
+  stdout: ringkasan singkat + lokasi berkas, bukan JSON
 
-  env: VBENCH_SLUG VBENCH_TITLE VBENCH_PROVIDER VBENCH_LOCATION
-       VBENCH_PRICE VBENCH_CURRENCY VBENCH_CPU_CORES VBENCH_RAM_GB
-       VBENCH_STORAGE_GB VBENCH_STORAGE_TYPE VBENCH_BANDWIDTH_TB
-       VBENCH_VIRTUALIZATION VBENCH_STATUS VBENCH_AFFILIATE
-       VBENCH_LAST_UPDATED
+METADATA OPSIONAL
+  Kalau memang mau diisi sekalian lewat perintah:
+  --title --provider --location --price --currency
+  --cpu-cores --ram-gb --storage-gb --bandwidth-tb
+  --storage-type --virtualization --status --affiliate
+  --last-updated <Y-m-d>   --tag <teks> (bisa diulang)
+
+  Sama juga lewat env: VBENCH_TITLE VBENCH_PROVIDER VBENCH_LOCATION
+  VBENCH_PRICE VBENCH_CURRENCY VBENCH_CPU_CORES VBENCH_RAM_GB
+  VBENCH_STORAGE_GB VBENCH_STORAGE_TYPE VBENCH_BANDWIDTH_TB
+  VBENCH_VIRTUALIZATION VBENCH_STATUS VBENCH_AFFILIATE VBENCH_LAST_UPDATED
 
 LAIN
   -o <dir>            Folder keluaran (default ./bench-results)
@@ -76,8 +87,9 @@ LAIN
   -h, --help          Bantuan ini
 
 SETELAH SELESAI
-  Salin <slug>.json ke src/data/vps/ dan yabs.txt + benchsh.txt ke
-  src/data/raw/<slug>/ di repo, lalu jalankan pnpm build.
+  cp <slug>.json  src/data/vps/
+  mkdir -p src/data/raw/<slug> && cp yabs.txt benchsh.txt src/data/raw/<slug>/
+  pnpm build
 EOF
 }
 
@@ -150,8 +162,18 @@ done
 
 need jq
 need curl
-[[ -n "$slug" ]] || die "perlu --slug (atau env VBENCH_SLUG)"
 [[ -n "$host" || -n "$parse_only" ]] || die "perlu <host> atau --only-parse <dir>"
+
+# Slug boleh dikosongkan: nama berkas jadi vps-yang-diuji (<stempel>) supaya skrip
+# tetap jalan tanpa metadata. Nama yang rapi tetap lebih enak ditulis manual.
+if [[ -z "$slug" ]]; then
+    if [[ -n "$host" ]]; then
+        slug="$(printf '%s' "$host" | tr -c '[:alnum:].-' '-' | sed 's/-\{1,\}$//')"
+    else
+        slug="vps"
+    fi
+    warn "tanpa --slug, pakai '$slug'. ganti namanya kalau perlu."
+fi
 
 # Parser dimuat setelah argumen divalidasi supaya --help tidak butuh jaringan.
 # VBENCH_LIB_DIR menunjuk salinan lokal, berguna untuk penggunaan offline dan
@@ -159,22 +181,24 @@ need curl
 TMPDIR_RUN="$(mktemp -d "${TMPDIR:-/tmp}/vbstandalone.XXXXXX")" \
     || die "gagal membuat folder sementara"
 if [[ -n "${VBENCH_LIB_DIR:-}" ]]; then
-    for f in bench_parse.sh astro_data.sh; do
+    for f in bench_parse.sh astro_data.sh bench_render.sh; do
         [[ -f "$VBENCH_LIB_DIR/$f" ]] || die "lib tidak ditemukan: $VBENCH_LIB_DIR/$f"
         cp "$VBENCH_LIB_DIR/$f" "$TMPDIR_RUN/$f" || die "gagal menyalin $f"
     done
 else
     hex_muat_lib bench_parse.sh "$TMPDIR_RUN/bench_parse.sh"
     hex_muat_lib astro_data.sh "$TMPDIR_RUN/astro_data.sh"
+    hex_muat_lib bench_render.sh "$TMPDIR_RUN/bench_render.sh"
 fi
 # shellcheck source=/dev/null
 . "$TMPDIR_RUN/bench_parse.sh"
 # shellcheck source=/dev/null
 . "$TMPDIR_RUN/astro_data.sh"
+# shellcheck source=/dev/null
+. "$TMPDIR_RUN/bench_render.sh"
 
-[[ -n "$v_title" ]]     || die "perlu --title"
-[[ -n "$v_provider" ]]  || die "perlu --provider"
-[[ -n "$v_location" ]]  || die "perlu --location"
+# Metadata kosong itu disengaja: kolom harga/lokasi/link/tag sengaja dikosongkan
+# supaya diisi manual di JSON nanti. Field yang tidak diisi dibuang dari JSON.
 
 if [[ -z "$v_updated" ]]; then
     v_updated="$(date '+%Y-%m-%d')"
@@ -334,9 +358,14 @@ jq -e . "$out_json" >/dev/null 2>&1 || die "JSON hasil tidak valid"
 
 # --- ringkasan + hasil --------------------------------------------------------
 
+out_md="$OUT_DIR/$slug.md"
+hex_render_vps "$out_json" "$out_md" || die "gagal menyusun Markdown"
+[[ -s "$out_md" ]] || die "Markdown hasil kosong"
+
 warn "selesai."
 printf '\n' >&2
 printf '  json : %s\n' "$out_json" >&2
+printf '  md   : %s\n' "$out_md" >&2
 printf '  raw  : %s\n' "$OUT_DIR" >&2
 printf '\n' >&2
 printf '  Salin manual ke repo:\n' >&2
@@ -351,4 +380,6 @@ if [[ -s "$OUT_DIR/benchsh.txt" ]]; then
 fi
 printf '    pnpm build\n\n' >&2
 
-cat "$out_json"
+# stdout sengaja bukan JSON: yang dipakai orang adalah kedua berkas di folder
+# hasil, jadi jangan sampai terganti diam-diam kalau di-redirect.
+printf 'selesai. json + md di %s\n' "$OUT_DIR"

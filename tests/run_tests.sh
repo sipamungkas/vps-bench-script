@@ -364,6 +364,64 @@ eq "tidak ada JSON palsu dibuat" "$(ls "$WORK"/ssh/yabs/*/*/result.json 2>/dev/n
 eq "log error ssh tersimpan" "$(ls "$WORK"/ssh/yabs/*/*/ssh.err 2>/dev/null | wc -l | tr -d ' ')" "1"
 
 # ---------------------------------------------------------------------------
+section "laporan gabungan VPS (json + md)"
+SA="$ROOT/tools/vps-bench-standalone"
+mkdir -p "$WORK/mentah"
+cp "$TESTS_DIR/fixture-yabs.txt" "$WORK/mentah/yabs.txt"
+cp "$TESTS_DIR/fixture-bench.txt" "$WORK/mentah/benchsh.txt"
+
+out="$(VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --only-parse "$WORK/mentah" \
+        --slug uji-singkat -o "$WORK/sa" 2>/dev/null)"
+eq "perintah minimal jalan tanpa metadata" "$?" "0"
+eq "stdout bukan JSON" "$(printf '%s' "$out" | jq -e . >/dev/null 2>&1 && echo json || echo teks)" "teks"
+
+# stempel waktu di tengah path, jadi path-nya dicari dulu. Glob di dalam
+# assignment tidak pernah di-expand.
+SJ="$(ls "$WORK"/sa/uji-singkat/*/uji-singkat.json 2>/dev/null | head -1)"
+SM="$(ls "$WORK"/sa/uji-singkat/*/uji-singkat.md 2>/dev/null | head -1)"
+eq "JSON terbentuk" "$([[ -s $SJ ]] && echo ya || echo tidak)" "ya"
+eq "Markdown terbentuk" "$([[ -s $SM ]] && echo ya || echo tidak)" "ya"
+
+# metadata kosong harus jadi null/[] di JSON, bukan string kosong
+eq_jq "title jatuh ke slug"    '.title'     'uji-singkat' "$SJ"
+eq_jq "harga null"             '.price_monthly' 'null'   "$SJ"
+eq_jq "affiliate null"         '.affiliate_link' 'null'  "$SJ"
+eq_jq "tags kosong"            '.tags | length' '0'      "$SJ"
+eq_jq "lokasi null"            '.location'   'null'      "$SJ"
+eq_jq "summary tetap terisi"   '.summary.geekbench_single != null' 'true' "$SJ"
+
+# markdown gabungan: paket + ringkasan + iperf3 + speedtest
+eq "md ada judul"          "$(grep -c '^# uji-singkat$' "$SM")" "1"
+eq "md ada tabel paket"    "$(grep -c '^| Harga bulanan |' "$SM")" "1"
+eq "md ada ringkasan"      "$(grep -c '^## Ringkasan$' "$SM")" "1"
+eq "md ada bagian YABS"    "$(grep -c '^## YABS$' "$SM")" "1"
+eq "md ada bagian bench"   "$(grep -c '^## bench.sh$' "$SM")" "1"
+eq "md memuat iperf3"      "$(grep -c '^| iPerf | Warsaw, Poland (10G) |' "$SM")" "1"
+eq "md memuat speedtest"   "$(grep -c '^| Los Angeles, US |' "$SM")" "1"
+eq "hanya satu Generated"  "$(grep -c '^Generated: ' "$SM")" "1"
+eq "tidak ada judul ganda" "$(grep -c '^# Benchmark Report' "$SM")" "0"
+
+# slug boleh lewat dari nama host, tapi host tetap wajib
+mkdir -p "$WORK/mentah2"
+cp "$TESTS_DIR/fixture-bench.txt" "$WORK/mentah2/benchsh.txt"
+VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --only-parse "$WORK/mentah2" \
+    --slug tetap-slip -o "$WORK/sa2" >/dev/null 2>&1
+eq "hanya benchsh tetap bisa" "$(ls "$WORK"/sa2/tetap-slip/*/tetap-slip.md 2>/dev/null | wc -l | tr -d ' ')" "1"
+
+# bagian yang tidak ada tidak boleh muncul sebagai judul kosong
+mkdir -p "$WORK/mentah3"
+cp "$TESTS_DIR/fixture-yabs.txt" "$WORK/mentah3/yabs.txt"
+VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --only-parse "$WORK/mentah3" \
+    --slug yabs-saja -o "$WORK/sa3" >/dev/null 2>&1
+SM3="$(ls "$WORK"/sa3/yabs-saja/*/yabs-saja.md 2>/dev/null | head -1)"
+eq "bagian bench absen dihilangkan" "$(grep -c '^## bench.sh$' "$SM3" || true)" "0"
+eq "bagian yabs tetap ada"          "$(grep -c '^## YABS$' "$SM3")" "1"
+
+out="$(VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --only-parse "$WORK/mentah" -o "$WORK/sa4" 2>&1)"
+eq "tanpa --slug tetap jalan" "$?" "0"
+eq "tanpa --slug diperingatkan" "$(printf '%s' "$out" | grep -c 'tanpa --slug')" "1"
+
+# ---------------------------------------------------------------------------
 section "folder keluaran tidak saling menimpa"
 for i in 1 2; do
     "$BIN" bench-parse "$TESTS_DIR/fixture-bench.txt" -o "$WORK/coll" >/dev/null 2>&1

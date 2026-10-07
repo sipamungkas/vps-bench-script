@@ -201,6 +201,99 @@ hex_render_bench() {
     ' "$json" >"$out"
 }
 
+# --- VPS (gabungan) -> Markdown ------------------------------------------------
+# Satu laporan yang memuat metadata paket, ringkasan angka, lalu laporan YABS
+# dan bench.sh apa adanya di bawahnya. Dipakai oleh vps-bench-standalone supaya
+# hasilnya tidak perlu digabung manual.
+#
+# Benchmarks yang tidak ada (null) dilewati diam-diam - slug yang baru diimpor
+# sering hanya punya satu dari keduanya.
+#
+# hex_render_vps <vps_json> <keluaran_md>
+hex_render_vps() {
+    local json="$1" out="$2" tmp_a tmp_b
+
+    if ! jq -e . "$json" >/dev/null 2>&1; then
+        printf 'Error: %s bukan JSON yang valid\n' "$json" >&2
+        return 1
+    fi
+
+    tmp_a="$(mktemp "${TMPDIR:-/tmp}/vpsmd.yabs.XXXXXX")" || return 1
+    tmp_b="$(mktemp "${TMPDIR:-/tmp}/vpsmd.bench.XXXXXX")" || { rm -f "$tmp_a"; return 1; }
+
+    if jq -e '.benchmarks.yabs != null' "$json" >/dev/null 2>&1; then
+        jq '.benchmarks.yabs' "$json" >"$tmp_a"
+        hex_render_yabs "$tmp_a" "$tmp_a.md" || { rm -f "$tmp_a" "$tmp_b"; return 1; }
+        mv "$tmp_a.md" "$tmp_a"
+    fi
+    if jq -e '.benchmarks.benchsh != null' "$json" >/dev/null 2>&1; then
+        jq '.benchmarks.benchsh' "$json" >"$tmp_b"
+        hex_render_bench "$tmp_b" "$tmp_b.md" || { rm -f "$tmp_a" "$tmp_b"; return 1; }
+        mv "$tmp_b.md" "$tmp_b"
+    fi
+
+    jq -r "$jq_defs"'
+      def tags: if ((. // []) | length) > 0 then join(", ") else "-" end;
+      def harga:
+        if .price_monthly == null then "-"
+        else (if .currency == null then (.price_monthly | tostring)
+              else ((.price_monthly | tostring) + " " + .currency) end)
+        end;
+      def bold: if . == null then "-" else "**" + (. | tostring) + "**" end;
+      . as $v
+      | "# " + (($v.title // $v.slug // "VPS") | tostring) + "\n" +
+        "Generated: " + (now | gmtime | strftime("%Y-%m-%d %H:%M:%S UTC")) + "\n" +
+
+        "\n## Paket\n" +
+        "| Field | Value |\n|---|---|\n" +
+        "| Slug | " + ($v.slug | cellx) + " |\n" +
+        "| Provider | " + ($v.provider | cellx) + " |\n" +
+        "| Badan usaha | " + ($v.provider_legal | cellx) + " |\n" +
+        "| Lokasi | " + ($v.location | cellx) + " |\n" +
+        "| Harga bulanan | " + ($v | harga) + " |\n" +
+        "| CPU cores | " + ($v.cpu_cores | num) + " |\n" +
+        "| RAM (GB) | " + ($v.ram_gb | num) + " |\n" +
+        "| Storage (GB) | " + ($v.storage_gb | num) + " |\n" +
+        "| Storage type | " + ($v.storage_type | cellx) + " |\n" +
+        "| Bandwidth (TB) | " + ($v.bandwidth_tb | num) + " |\n" +
+        "| Virtualization | " + ($v.virtualization | cellx) + " |\n" +
+        "| Status | " + ($v.status | cellx) + " |\n" +
+        "| Affiliate | " + ($v.affiliate_link | cellx) + " |\n" +
+        "| Tags | " + ($v.tags | tags) + " |\n" +
+        "| Diperbarui | " + ($v.last_updated | cellx) + " |\n" +
+
+        "\n## Ringkasan\n" +
+        "| Metrik | Nilai |\n|---|---|\n" +
+        "| Geekbench single | " + ($v.summary.geekbench_single | num) + " |\n" +
+        "| Geekbench multi | " + ($v.summary.geekbench_multi | num) + " |\n" +
+        "| Max IOPS | " + ($v.summary.max_iops | num) + " |\n" +
+        "| Max read (MB/s) | " + ($v.summary.max_read_mb_s | num) + " |\n" +
+        "| Max write (MB/s) | " + ($v.summary.max_write_mb_s | num) + " |\n" +
+        "| dd average (MB/s) | " + ($v.summary.dd_avg_mb_s | num) + " |\n" +
+        "| iperf3 send terbaik | " + ($v.summary.best_iperf_send | cellx) + " |\n" +
+        "| Speedtest download terbaik | " + ($v.summary.speedtest_best_download | cellx) + " |\n"
+    ' "$json" >"$out" || { rm -f "$tmp_a" "$tmp_b"; return 1; }
+
+    # Laporan di bawah dinurunkan satu level heading supaya tidak menabrak
+    # "# Judul" di atas. Baris judul dan "Generated:" milik masing-masing
+    # laporan dibuang, supaya tidak ada dua timestamp dalam satu file.
+    if [[ -s "$tmp_a" ]]; then
+        printf '\n## YABS\n\n' >>"$out"
+        hex_md_turunkan "$tmp_a" >>"$out"
+    fi
+    if [[ -s "$tmp_b" ]]; then
+        printf '\n## bench.sh\n\n' >>"$out"
+        hex_md_turunkan "$tmp_b" >>"$out"
+    fi
+
+    rm -f "$tmp_a" "$tmp_b"
+}
+
+# hex_md_turunkan: buang judul + baris Generated, naikkan heading satu level.
+hex_md_turunkan() {
+    sed -e '1d' -e '/^Generated: /d' -e 's/^\(#\{1,\}\)/#\1/' "$1"
+}
+
 # Pilih renderer berdasarkan isi JSON.
 # JSON native YABS tidak punya field .schema, jadi dideteksi dari strukturnya.
 # hex_render_auto <json> <keluaran_md>
