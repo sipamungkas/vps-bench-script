@@ -1,0 +1,44 @@
+[3J[H[2J-------------------- A Bench.sh Script By Teddysun -------------------
+ Version            : [0;31;32mv2026-01-31[0m
+ Usage              : [0;31;31mwget -qO- bench.sh | bash[0m
+-                                                                     
+ CPU Model          : [0;31;34mIntel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz[0m
+ CPU Cores          : [0;31;34m2 @ 2400 MHz[0m
+ CPU Cache          : [0;31;34m8192 KB[0m
+ AES-NI             : [0;31;32m✓ Enabled[0m
+ VM-x/AMD-V         : [0;31;32m✓ Enabled[0m
+ Total Disk         : [0;31;33m80.0 GB[0m [0;31;34m(21.4 GB Used)[0m
+ Total RAM          : [0;31;33m3.9 GB[0m [0;31;34m(1.2 GB Used)[0m
+ Total Swap         : [0;31;34m0 B (0 B Used)[0m
+ System Uptime      : [0;31;34m14 days, 6 hours, 21 minutes[0m
+ Load Average       : [0;31;34m0.12, 0.09, 0.07[0m
+ OS                 : [0;31;34mUbuntu 22.04.4 LTS[0m
+ Arch               : [0;31;34mx86_64 (64 Bit)[0m
+ Kernel             : [0;31;34m5.15.0-119-generic[0m
+ TCP Congestion Ctrl: [0;31;33mbbr[0m
+ Virtualization     : [0;31;34mkvm[0m
+ IPv4/IPv6          : [0;31;32m✓ Online[0m / [0;31;32m✓ Online[0m
+ Organization       : [0;31;34mAS64496 Example Hosting[0m
+ Location           : [0;31;34mAmsterdam / NL[0m
+ Region             : [0;31;33mNorth Holland[0m
+-                                                                     
+ I/O Speed(1st run) : [0;31;33m612.44[0m MB/s
+ I/O Speed(2nd run) : [0;31;33m588.10[0m MB/s
+ I/O Speed(3rd run) : [0;31;33m601.77[0m MB/s
+ I/O Speed(average) : [0;31;33m600.77 MB/s[0m
+-                                                                     
+[0;33m Speedtest.net    [0;32m42.15 Mbit/s      [0;31m168.72 Mbit/s       [0;36m8.44 ms     [0m
+[0;33m Los Angeles, US  [0;32m51.02 Mbit/s      [0;31m204.31 Mbit/s       [0;36m152.88 ms   [0m
+[0;33m Dallas, US       [0;32m48.77 Mbit/s      [0;31m196.05 Mbit/s       [0;36m44.19 ms    [0m
+[0;33m Montreal, CA     [0;32m52.90 Mbit/s      [0;31m212.44 Mbit/s       [0;36m151.02 ms   [0m
+[0;33m Paris, FR        [0;32m47.11 Mbit/s      [0;31m189.63 Mbit/s       [0;36m12.77 ms    [0m
+[0;33m Amsterdam, NL    [0;32m50.05 Mbit/s      [0;31m201.88 Mbit/s       [0;36m9.31 ms     [0m
+[0;33m Suzhou, CN       [0;32m18.22 Mbit/s      [0;31m74.55 Mbit/s        [0;36m182.40 ms   [0m
+[0;33m Hong Kong, CN    [0;32m12.03 Mbit/s      [0;31m48.91 Mbit/s        [0;36m186.55 ms   [0m
+[0;33m Singapore, SG    [0;32m16.88 Mbit/s      [0;31m67.24 Mbit/s        [0;36m170.02 ms   [0m
+[0;33m Tokyo, JP        [0;32m22.41 Mbit/s      [0;31m89.70 Mbit/s        [0;36m164.18 ms   [0m
+[0;33m Sydney, AU       [0;31mTest failed       [0m
+-                                                                     
+ Finished in        : 6 min 47 sec
+ Timestamp          : 2026-10-07 03:14:52
+----------------------------------------------------------------------

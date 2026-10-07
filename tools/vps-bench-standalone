@@ -1,0 +1,354 @@
+#!/usr/bin/env bash
+# vps-bench-standalone - jalankan benchmark VPS dari mana saja, lalu cetak
+# JSON yang siap disalin ke src/data/vps/<slug>.json
+#
+# Dirancang untuk dipanggil tanpa clone repo:
+#
+#   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/vps-bench-standalone \
+#     | bash -s -- <host> --slug <slug> --title <judul> --provider <nama> [opsi]
+#
+# Keluarannya:
+#   stdout  JSON final, persis format src/data/vps/<slug>.json
+#   stderr  progres, lokasi file mentah, dan perintah untuk menyalin
+#   folder  ./bench-results/<slug>/<stempel>/ berisi yabs.txt, benchsh.txt, <slug>.json
+#
+# Parsers TIDAK ditulis ulang di sini. Berkas ini hanya mengunduh
+# tools/lib/*.sh dari repo lalu mem-`-source`-nya, sehingga hanya ada satu
+# implementasi parser. Menyalin logika jq ke dua tempat berisiko parsing dan
+# data situs diam-diam berbeda.
+#
+# Dibuat untuk bash 3.2 (default macOS): tanpa associative array, tanpa ${var^^}.
+
+set -uo pipefail
+
+VBENCH_REPO="${VBENCH_REPO:-sipamungkas/vps-bench-script}"
+VBENCH_REF="${VBENCH_REF:-main}"
+RAW_BASE="https://raw.githubusercontent.com/$VBENCH_REPO/$VBENCH_REF"
+
+SSH_OPTS="${BENCH_EXPORT_SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=15}"
+YABS_FLAGS="${BENCH_EXPORT_YABS_FLAGS:--j}"
+
+TMPDIR_RUN=""
+cleanup() { [[ -n "$TMPDIR_RUN" && -d "$TMPDIR_RUN" ]] && rm -rf "$TMPDIR_RUN"; }
+trap cleanup EXIT INT TERM
+
+die()  { printf '\033[31mError:\033[0m %s\n' "$1" >&2; exit "${2:-1}"; }
+info() { printf '\033[2m%s\033[0m\n' "$1" >&2; }
+warn() { printf '\033[33m%s\033[0m\n' "$1" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "butuh '$1' tapi tidak ditemukan."; }
+
+usage() {
+    cat >&2 <<'EOF'
+vps-bench-standalone - benchmark VPS lalu cetak JSON siap-import
+
+PAKAI
+  curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/vps-bench-standalone \
+    | bash -s -- <host> --slug <slug> --title <judul> [opsi]
+
+YANG DIJALANKAN
+  <host>  YABS.sh  lalu  bench.sh, berurutan. Total 20-35 menit.
+          Paket akan ikut terunduh di server, jadi butuh curl + bash di sana.
+
+METADATA (boleh lewat flag atau env)
+  --slug <s>          Wajib. Nama file JSON, mis. nevacloud-nvme-jkt
+  --title <teks>      Nama paket yang tampil, mis. "Nevacloud NVMe Jakarta"
+  --provider <nama>   "Nama (Badan Usaha)" otomatis dipecah jadi 2 field
+  --location <teks>   mis. "Jakarta, Indonesia"
+  --price <angka>     Harga bulanan
+  --currency <kode>   IDR | USD | AUD
+  --cpu-cores <n> --ram-gb <n> --storage-gb <n> --bandwidth-tb <n>
+  --storage-type <s> --virtualization <s> --status <s>
+  --affiliate <url>   Link referral
+  --last-updated <Y-m-d>
+  --tag <teks>        Bisa diulang
+
+  env: VBENCH_SLUG VBENCH_TITLE VBENCH_PROVIDER VBENCH_LOCATION
+       VBENCH_PRICE VBENCH_CURRENCY VBENCH_CPU_CORES VBENCH_RAM_GB
+       VBENCH_STORAGE_GB VBENCH_STORAGE_TYPE VBENCH_BANDWIDTH_TB
+       VBENCH_VIRTUALIZATION VBENCH_STATUS VBENCH_AFFILIATE
+       VBENCH_LAST_UPDATED
+
+LAIN
+  -o <dir>            Folder keluaran (default ./bench-results)
+  --skip-yabs         Jangan jalankan YABS.sh
+  --skip-bench        Jangan jalankan bench.sh
+  --only-parse <dir>  Lewati SSH, pakai file mentah yang sudah ada
+  -h, --help          Bantuan ini
+
+SETELAH SELESAI
+  Salin <slug>.json ke src/data/vps/ dan yabs.txt + benchsh.txt ke
+  src/data/raw/<slug>/ di repo, lalu jalankan pnpm build.
+EOF
+}
+
+# --- unduh parser ------------------------------------------------------------
+
+hex_muat_lib() {
+    local nama="$1" tujuan="$2"
+    curl -fsSL "$RAW_BASE/tools/lib/$nama" -o "$tujuan" 2>/dev/null \
+        || die "gagal mengunduh tools/lib/$nama dari $RAW_BASE"
+    [[ -s "$tujuan" ]] || die "tools/lib/$nama kosong - cek VBENCH_REPO/VBENCH_REF"
+}
+
+# --- argumen -----------------------------------------------------------------
+
+host=""
+slug="${VBENCH_SLUG:-}"
+v_title="${VBENCH_TITLE:-}"
+v_provider="${VBENCH_PROVIDER:-}"
+v_location="${VBENCH_LOCATION:-}"
+v_price="${VBENCH_PRICE:-}"
+v_currency="${VBENCH_CURRENCY:-}"
+v_cores="${VBENCH_CPU_CORES:-}"
+v_ram="${VBENCH_RAM_GB:-}"
+v_storage="${VBENCH_STORAGE_GB:-}"
+v_stype="${VBENCH_STORAGE_TYPE:-}"
+v_bw="${VBENCH_BANDWIDTH_TB:-}"
+v_virt="${VBENCH_VIRTUALIZATION:-}"
+v_status="${VBENCH_STATUS:-}"
+v_aff="${VBENCH_AFFILIATE:-}"
+v_updated="${VBENCH_LAST_UPDATED:-}"
+v_tags="[]"
+
+OUT_DIR="${BENCH_RESULT_DIR:-$PWD/bench-results}"
+skip_yabs=0
+skip_bench=0
+parse_only=""
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --slug)            slug="${2:-}"; shift 2 ;;
+        --title)           v_title="${2:-}"; shift 2 ;;
+        --provider)        v_provider="${2:-}"; shift 2 ;;
+        --location)        v_location="${2:-}"; shift 2 ;;
+        --price)           v_price="${2:-}"; shift 2 ;;
+        --currency)        v_currency="${2:-}"; shift 2 ;;
+        --cpu-cores)       v_cores="${2:-}"; shift 2 ;;
+        --ram-gb)          v_ram="${2:-}"; shift 2 ;;
+        --storage-gb)      v_storage="${2:-}"; shift 2 ;;
+        --storage-type)    v_stype="${2:-}"; shift 2 ;;
+        --bandwidth-tb)    v_bw="${2:-}"; shift 2 ;;
+        --virtualization)  v_virt="${2:-}"; shift 2 ;;
+        --status)          v_status="${2:-}"; shift 2 ;;
+        --affiliate)       v_aff="${2:-}"; shift 2 ;;
+        --last-updated)    v_updated="${2:-}"; shift 2 ;;
+        --tag)
+            v_tags="$(jq -n --argjson acc "$v_tags" --arg v "${2:-}" '$acc + [$v]')"
+            shift 2 ;;
+        -o)                OUT_DIR="${2:-}"; shift 2 ;;
+        --skip-yabs)       skip_yabs=1; shift ;;
+        --skip-bench)      skip_bench=1; shift ;;
+        --only-parse)      parse_only="${2:-}"; shift 2 ;;
+        --host)            host="${2:-}"; shift 2 ;;
+        -h|--help)         usage; exit 0 ;;
+        -*)                die "opsi tidak dikenal: $1" ;;
+        *)
+            [[ -z "$host" ]] || die "lebih dari satu host: $host $1"
+            host="$1"; shift ;;
+    esac
+done
+
+need jq
+need curl
+[[ -n "$slug" ]] || die "perlu --slug (atau env VBENCH_SLUG)"
+[[ -n "$host" || -n "$parse_only" ]] || die "perlu <host> atau --only-parse <dir>"
+
+# Parser dimuat setelah argumen divalidasi supaya --help tidak butuh jaringan.
+# VBENCH_LIB_DIR menunjuk salinan lokal, berguna untuk penggunaan offline dan
+# untuk menguji skrip ini tanpa menyentuh GitHub.
+TMPDIR_RUN="$(mktemp -d "${TMPDIR:-/tmp}/vbstandalone.XXXXXX")" \
+    || die "gagal membuat folder sementara"
+if [[ -n "${VBENCH_LIB_DIR:-}" ]]; then
+    for f in bench_parse.sh astro_data.sh; do
+        [[ -f "$VBENCH_LIB_DIR/$f" ]] || die "lib tidak ditemukan: $VBENCH_LIB_DIR/$f"
+        cp "$VBENCH_LIB_DIR/$f" "$TMPDIR_RUN/$f" || die "gagal menyalin $f"
+    done
+else
+    hex_muat_lib bench_parse.sh "$TMPDIR_RUN/bench_parse.sh"
+    hex_muat_lib astro_data.sh "$TMPDIR_RUN/astro_data.sh"
+fi
+# shellcheck source=/dev/null
+. "$TMPDIR_RUN/bench_parse.sh"
+# shellcheck source=/dev/null
+. "$TMPDIR_RUN/astro_data.sh"
+
+[[ -n "$v_title" ]]     || die "perlu --title"
+[[ -n "$v_provider" ]]  || die "perlu --provider"
+[[ -n "$v_location" ]]  || die "perlu --location"
+
+if [[ -z "$v_updated" ]]; then
+    v_updated="$(date '+%Y-%m-%d')"
+fi
+[[ -n "$v_currency" ]] || v_currency="USD"
+
+# --- folder keluaran ---------------------------------------------------------
+
+if [[ -n "$parse_only" ]]; then
+    # Folder sumber dan folder keluaran dipisah supaya berkas mentah yang
+    # jadi masukan tidak pernah ikut tertimpa JSON hasil.
+    [[ -d "$parse_only" ]] || die "folder tidak ditemukan: $parse_only"
+    parse_src="$parse_only"
+    OUT_DIR="$OUT_DIR/$slug/$(date '+%Y%m%d-%H%M%S')"
+    info "mode --only-parse: membaca $parse_src"
+else
+    OUT_DIR="$OUT_DIR/$slug/$(date '+%Y%m%d-%H%M%S')"
+    need ssh
+fi
+
+mkdir -p "$OUT_DIR" || die "gagal membuat $OUT_DIR"
+
+f_yabs="$OUT_DIR/yabs.txt"
+f_bench="$OUT_DIR/benchsh.txt"
+
+hex_tampilkan_err() {
+    local f="$1" jml=3 line
+    [[ -s "$f" ]] || return 0
+    warn "pesan dari ssh:"
+    while IFS= read -r line; do
+        printf '    %s\n' "$line" >&2
+    done < <(tail -n "$jml" "$f")
+}
+
+# --- jalankan test -----------------------------------------------------------
+
+if [[ -n "$parse_src" ]]; then
+    if [[ -s "$parse_src/yabs.txt" ]]; then
+        cp "$parse_src/yabs.txt" "$f_yabs"
+    else
+        skip_yabs=1
+    fi
+    if [[ -s "$parse_src/benchsh.txt" ]]; then
+        cp "$parse_src/benchsh.txt" "$f_bench"
+    else
+        skip_bench=1
+    fi
+fi
+
+if [[ $skip_yabs -eq 0 && -z "$parse_src" ]]; then
+    info "[1/2] YABS.sh di $host (10-20 menit)..."
+    ssh $SSH_OPTS "$host" "curl -fsSL https://yabs.sh | bash -s -- $YABS_FLAGS" \
+        >"$f_yabs" 2>"$OUT_DIR/yabs.err"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        warn "ssh keluar dengan kode $rc"
+        hex_tampilkan_err "$OUT_DIR/yabs.err"
+        [[ -s "$f_yabs" ]] || die "tidak ada output YABS dari remote"
+    fi
+    [[ -s "$f_yabs" ]] || die "output YABS kosong"
+else
+    info "[1/2] YABS dilewati"
+fi
+
+if [[ $skip_bench -eq 0 && -z "$parse_src" ]]; then
+    info "[2/2] bench.sh di $host (10-15 menit)..."
+    ssh $SSH_OPTS "$host" "curl -fsSL https://bench.sh | bash" \
+        >"$f_bench" 2>"$OUT_DIR/bench.err"
+    rc=$?
+    if [[ $rc -ne 0 ]]; then
+        warn "ssh keluar dengan kode $rc"
+        hex_tampilkan_err "$OUT_DIR/bench.err"
+        [[ -s "$f_bench" ]] || die "tidak ada output bench.sh dari remote"
+    fi
+    [[ -s "$f_bench" ]] || die "output bench.sh kosong"
+else
+    info "[2/2] bench.sh dilewati"
+fi
+
+# --- parse -------------------------------------------------------------------
+
+# Satu parser untuk YABS: coba JSON native dulu, jatuh ke teks. Sama seperti
+# `vps-bench yabs`, supaya hasilnya sama persis baik lewat `yabs` atau lewat
+# teks yang sudah tersimpan.
+hex_parse() {
+    local jenis="$1" f="$2" out="$3"
+    case "$jenis" in
+        yabs)
+            hex_ambil_json_yabs "$f" > "$out" 2>/dev/null
+            if [[ -s "$out" ]] && jq -e . "$out" >/dev/null 2>&1; then
+                jq '. + {schema:"yabs", source:"yabs-native-json"}' "$out" > "$out.t" \
+                    && mv "$out.t" "$out"
+            else
+                : > "$out"
+                hex_yabs_teks "$f" "$out" || return 1
+            fi
+            ;;
+        bench)
+            hex_bench_teks "$f" "$out" || return 1
+            ;;
+    esac
+}
+
+work="$TMPDIR_RUN/work"
+mkdir -p "$work"
+j_meta="$work/meta.json"
+j_yabs="$work/yabs.json"
+j_bench="$work/bench.json"
+
+if [[ -s "$f_yabs" ]]; then
+    hex_parse yabs "$f_yabs" "$j_yabs" || die "parse YABS gagal"
+else
+    printf 'null' > "$j_yabs"
+fi
+
+if [[ -s "$f_bench" ]]; then
+    hex_parse bench "$f_bench" "$j_bench" || die "parse bench.sh gagal"
+else
+    printf 'null' > "$j_bench"
+fi
+
+# Semua opsi metadata dirangkum dalam satu jq. Memecah per-opsi dengan loop
+# kata akan merusak nilai yang mengandung spasi.
+jq -n \
+    --arg title "$v_title" --arg provider "$v_provider" \
+    --arg location "$v_location" --arg currency "$v_currency" \
+    --arg storage_type "$v_stype" --arg virtualization "$v_virt" \
+    --arg status "$v_status" --arg affiliate_link "$v_aff" \
+    --arg last_updated "$v_updated" \
+    --arg price "$v_price" --arg cores "$v_cores" --arg ram "$v_ram" \
+    --arg storage "$v_storage" --arg bw "$v_bw" \
+    --argjson tags "$v_tags" '
+    def s(x): if x == "" then null else x end;
+    def n(x): if x == "" then null else (x | tonumber? // x) end;
+    {
+      title: s($title), provider: s($provider), location: s($location),
+      currency: s($currency), storage_type: s($storage_type),
+      virtualization: s($virtualization), status: s($status),
+      affiliate_link: s($affiliate_link), last_updated: s($last_updated),
+      price_monthly: n($price), cpu_cores: n($cores), ram_gb: n($ram),
+      storage_gb: n($storage), bandwidth_tb: n($bw),
+      tags: $tags
+    }
+    | with_entries(select(.value != null))' > "$j_meta"
+
+# hex_tulis_vps menulis ke $VPS_DATA_DIR/<slug>.json. Di sini diarahkan ke
+# folder keluaran lokal supaya repo yang aktif tidak ikut tersentuh - hasilnya
+# dicetak untuk disalin manual.
+VPS_DATA_DIR="$OUT_DIR"
+export VPS_DATA_DIR
+
+out_json="$(hex_tulis_vps "$slug" "$j_meta" "$j_yabs" "$j_bench")" \
+    || die "gagal menyusun JSON"
+
+[[ -s "$out_json" ]] || die "JSON hasil kosong"
+jq -e . "$out_json" >/dev/null 2>&1 || die "JSON hasil tidak valid"
+
+# --- ringkasan + hasil --------------------------------------------------------
+
+warn "selesai."
+printf '\n' >&2
+printf '  json : %s\n' "$out_json" >&2
+printf '  raw  : %s\n' "$OUT_DIR" >&2
+printf '\n' >&2
+printf '  Salin manual ke repo:\n' >&2
+printf '    cp %s/%s.json  src/data/vps/\n' "$OUT_DIR" "$slug" >&2
+if [[ -s "$OUT_DIR/yabs.txt" ]]; then
+    printf '    mkdir -p src/data/raw/%s\n' "$slug" >&2
+    printf '    cp %s/yabs.txt src/data/raw/%s/\n' "$OUT_DIR" "$slug" >&2
+fi
+if [[ -s "$OUT_DIR/benchsh.txt" ]]; then
+    printf '    mkdir -p src/data/raw/%s\n' "$slug" >&2
+    printf '    cp %s/benchsh.txt src/data/raw/%s/\n' "$OUT_DIR" "$slug" >&2
+fi
+printf '    pnpm build\n\n' >&2
+
+cat "$out_json"

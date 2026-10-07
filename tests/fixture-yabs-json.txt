@@ -1,0 +1,51 @@
+# ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## #
+#              Yet-Another-Bench-Script              #
+#                     v2026-09-20                    #
+# https://github.com/masonr/yet-another-bench-script #
+# ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## #
+
+Tue Sep 22 03:14:05 UTC 2026
+
+Basic System Information:
+---------------------------------
+Uptime     : 14 days, 6 hours, 21 minutes
+Processor  : Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz
+CPU cores  : 2 @ 2400 MHz
+AES-NI     : ✓ Enabled
+VM-x/AMD-V : ✓ Enabled
+RAM        : 3.9 GiB
+Swap       : 0.00 B
+Disk       : 80.00 GiB
+Distro     : Ubuntu 22.04.4 LTS
+Kernel     : 5.15.0-119-generic
+VM Type    : KVM
+IPv4/IPv6  : ✓ Online / ✓ Online
+
+ IPv4: AS64496 Example Hosting @ Amsterdam, North Holland, NL
+
+fio Disk Speed Tests (Mixed R/W 50/50) (Partition /dev/vda1):
+---------------------------------
+Block Size | 4KiB          (IOPS) | 1MiB          (IOPS)
+  ------   | ---            ----  | ----           ---- 
+Read       | 88.12 MB/s  (23013 iops) | 412.55 MB/s (1025 iops)
+Write      | 71.44 MB/s  (18203 iops) | 388.09 MB/s (981 iops)
+Mixed      | 79.01 MB/s  (20620 iops) | 400.77 MB/s (1003 iops)
+
+iperf3 Network Speed Tests (IPv4):
+---------------------------------
+Provider        | Location (Link)           | Send Speed      | Recv Speed      | Ping           
+-----           | -----                     | ----            | ----            | ----           
+iPerf           | Warsaw, Poland (10G)      | 412.55 Mbit/s   | 180.22 Mbit/s   | 187.9 ms       
+iPerf           | Amsterdam, NL (10G)       | 455.10 Mbit/s   | 201.77 Mbit/s   | 12.4 ms        
+iPerf           | London, UK (1G)           | 0.00 Mbit/s     | 0.00 Mbit/s     | 21.0 ms        
+
+Geekbench 6 Benchmark Test:
+---------------------------------
+Test            | Value                         
+                |                               
+Single Core     | 812                           
+Multi Core      | 1447                          
+Full Test       | https://browser.geekbench.com/v6/cpu/1234567
+
+YABS completed in 9 min 12 sec
+{"version":"v2026-09-20","time":"20261007-031452","os":{"arch":"x86_64","distro":"Ubuntu 22.04.4 LTS","kernel":"5.15.0-119-generic","uptime":1234567,"vm":"KVM"},"net":{"ipv4":true,"ipv6":true},"cpu":{"model":"Intel(R) Xeon(R) CPU E5-2680 v4 @ 2.40GHz","cores":2,"freq":"2400","aes":true,"virt":true},"mem":{"ram":4194304,"ram_units":"KiB","swap":0,"swap_units":"KiB","disk":83886080,"disk_units":"KB"},"ip_info":{"protocol":"IPv4","isp":"Example Hosting","asn":"AS64496","org":"Example Hosting BV","city":"Amsterdam","region":"North Holland","region_code":"NH","country":"NL"},"partition":"/dev/vda1","fio":[{"bs":"4KiB","speed_r":90235,"iops_r":23013,"speed_w":73155,"iops_w":18203,"speed_rw":80906,"iops_rw":20620,"speed_units":"KBps"},{"bs":"1MiB","speed_r":422451,"iops_r":1025,"speed_w":397404,"iops_w":981,"speed_rw":410388,"iops_rw":1003,"speed_units":"KBps"}],"iperf":[{"mode":"IPv4","provider":"iPerf","loc":"Warsaw, Poland (10G)","send":"412.55 Mbit/s","recv":"180.22 Mbit/s","latency":"187.9 ms"},{"mode":"IPv4","provider":"iPerf","loc":"Amsterdam, NL (10G)","send":"455.10 Mbit/s","recv":"201.77 Mbit/s","latency":"12.4 ms"},{"mode":"IPv4","provider":"iPerf","loc":"London, UK (1G)","send":"busy","recv":"busy","latency":"21.0 ms"}],"geekbench":[{"version":6,"single":812,"multi":1447,"url":"https://browser.geekbench.com/v6/cpu/1234567"}],"runtime":{"start":1759896892,"end":1759897444,"elapsed":552}}

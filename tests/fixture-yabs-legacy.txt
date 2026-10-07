@@ -1,0 +1,72 @@
+# ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## #
+#              Yet-Another-Bench-Script              #
+#                     v2025-04-20                    #
+# https://github.com/masonr/yet-another-bench-script #
+# ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## ## #
+
+Sat Jun 21 22:45:35 UTC 2025
+
+Basic System Information:
+---------------------------------
+Uptime     : 0 days, 0 hours, 19 minutes
+Processor  : AMD EPYC 9654 96-Core Processor
+CPU cores  : 1 @ 2396.400 MHz
+AES-NI     : ✔ Enabled
+VM-x/AMD-V : ✔ Enabled
+RAM        : 960.7 MiB
+Swap       : 0.0 KiB
+Disk       : 19.9 GiB
+Distro     : Ubuntu 24.04 LTS
+Kernel     : 6.8.0-31-generic
+VM Type    : KVM
+IPv4/IPv6  : ✔ Online / ✔ Online
+
+IPv6 Network Information:
+---------------------------------
+ISP        : PT Deneva
+ASN        : AS138115 PT Deneva
+Host       : PT Deneva
+Location   : Jakarta, Jakarta (JK)
+Country    : Indonesia
+
+fio Disk Speed Tests (Mixed R/W 50/50) (Partition /dev/sda1):
+---------------------------------
+Block Size | 4k            (IOPS) | 64k           (IOPS)
+  ------   | ---            ----  | ----           ---- 
+Read       | 177.26 MB/s  (44.3k) | 1.44 GB/s    (22.6k)
+Write      | 177.73 MB/s  (44.4k) | 1.45 GB/s    (22.7k)
+Total      | 354.99 MB/s  (88.7k) | 2.90 GB/s    (45.3k)
+           |                      |                     
+Block Size | 512k          (IOPS) | 1m            (IOPS)
+  ------   | ---            ----  | ----           ---- 
+Read       | 997.98 MB/s   (1.9k) | 756.17 MB/s    (738)
+Write      | 1.05 GB/s     (2.0k) | 806.53 MB/s    (787)
+Total      | 2.04 GB/s     (4.0k) | 1.56 GB/s     (1.5k)
+
+iperf3 Network Speed Tests (IPv4):
+---------------------------------
+Provider        | Location (Link)           | Send Speed      | Recv Speed      | Ping           
+-----           | -----                     | ----            | ----            | ----           
+Clouvider       | London, UK (10G)          | 241 Mbits/sec   | 203 Mbits/sec   | 189 ms         
+Eranium         | Amsterdam, NL (100G)      | 388 Mbits/sec   | 334 Mbits/sec   | 169 ms         
+Uztelecom       | Tashkent, UZ (10G)        | 82.7 Mbits/sec  | 109 Mbits/sec   | 248 ms         
+Leaseweb        | Singapore, SG (10G)       | 935 Mbits/sec   | 333 Mbits/sec   | 13.8 ms        
+Clouvider       | Los Angeles, CA, US (10G) | 224 Mbits/sec   | 122 Mbits/sec   | 183 ms         
+Leaseweb        | NYC, NY, US (10G)         | 241 Mbits/sec   | 264 Mbits/sec   | 253 ms         
+Edgoo           | Sao Paulo, BR (1G)        | busy            | 63.3 Mbits/sec  | 326 ms         
+
+iperf3 Network Speed Tests (IPv6):
+---------------------------------
+Provider        | Location (Link)           | Send Speed      | Recv Speed      | Ping           
+-----           | -----                     | ----            | ----            | ----           
+Clouvider       | London, UK (10G)          | 310 Mbits/sec   | 86.4 Mbits/sec  | 189 ms         
+Eranium         | Amsterdam, NL (100G)      | 264 Mbits/sec   | 342 Mbits/sec   | 169 ms         
+Uztelecom       | Tashkent, UZ (10G)        | 69.2 Mbits/sec  | 55.5 Mbits/sec  | 247 ms         
+Leaseweb        | Singapore, SG (10G)       | 467 Mbits/sec   | 382 Mbits/sec   | 15.9 ms        
+Clouvider       | Los Angeles, CA, US (10G) | 229 Mbits/sec   | 70.7 Mbits/sec  | 182 ms         
+Leaseweb        | NYC, NY, US (10G)         | 272 Mbits/sec   | 192 Mbits/sec   | 252 ms         
+Edgoo           | Sao Paulo, BR (1G)        | 192 Mbits/sec   | 40.7 Mbits/sec  | 326 ms         
+
+Geekbench test failed and low memory was detected. Add at least 1GB of SWAP or use GB4 instead (higher compatibility with low memory systems).
+
+YABS completed in 10 min 5 sec

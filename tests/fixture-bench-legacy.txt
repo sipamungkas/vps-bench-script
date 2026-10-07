@@ -1,0 +1,40 @@
+-------------------- A Bench.sh Script By Teddysun -------------------
+ Version            : v2025-05-08
+ Usage              : wget -qO- bench.sh | bash
+----------------------------------------------------------------------
+ CPU Model          : AMD EPYC 9654 96-Core Processor
+ CPU Cores          : 1 @ 2396.400 MHz
+ CPU Cache          : 512 KB
+ AES-NI             : ✓ Enabled
+ VM-x/AMD-V         : ✓ Enabled
+ Total Disk         : 19.9 GB (1.6 GB Used)
+ Total Mem          : 960.7 MB (288.4 MB Used)
+ System uptime      : 0 days, 0 hour 4 min
+ Load average       : 0.00, 0.00, 0.00
+ OS                 : Ubuntu 24.04 LTS
+ Arch               : x86_64 (64 Bit)
+ Kernel             : 6.8.0-31-generic
+ TCP CC             : cubic
+ Virtualization     : KVM
+ IPv4/IPv6          : ✓ Online / ✓ Online
+ Organization       : AS138115 PT Deneva
+ Location           : Cileungsir / ID
+ Region             : West Java
+----------------------------------------------------------------------
+ I/O Speed(1st run) : 5.4 GB/s
+ I/O Speed(2nd run) : 6.4 GB/s
+ I/O Speed(3rd run) : 4.9 GB/s
+ I/O Speed(average) : 5700.3 MB/s
+----------------------------------------------------------------------
+ Node Name        Upload Speed      Download Speed      Latency     
+ Speedtest.net    685.24 Mbps       477.13 Mbps         0.51 ms     
+ Paris, FR        462.50 Mbps       495.07 Mbps         185.62 ms   
+ Amsterdam, NL    422.90 Mbps       351.32 Mbps         175.42 ms   
+ Shanghai, CN     93.90 Mbps        251.15 Mbps         366.32 ms   
+ Hong Kong, CN    42.55 Mbps        356.27 Mbps         43.37 ms    
+ Singapore, SG    414.27 Mbps       299.39 Mbps         45.62 ms    
+ Tokyo, JP        581.30 Mbps       228.96 Mbps         92.35 ms    
+----------------------------------------------------------------------
+ Finished in        : 3 min 31 sec
+ Timestamp          : 2025-06-21 22:34:01 UTC
+----------------------------------------------------------------------

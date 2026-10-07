@@ -1,0 +1,407 @@
+#!/usr/bin/env bash
+# vps-bench - jalankan benchmark di VPS lalu ekspor hasilnya jadi JSON + Markdown
+#
+# Dibuat untuk bash 3.2 (default macOS): tanpa associative array, tanpa ${var^^}.
+#
+# PERINTAH
+#   yabs <host>          Jalankan YABS.sh di <host> via SSH -> JSON + Markdown
+#   bench <host>         Jalankan bench.sh di <host> via SSH -> JSON + Markdown
+#   import <slug>        Masukkan hasil benchmark ke src/data/vps/<slug>.json
+#   migrate              Ubah src/content/vps/*.md lama menjadi JSON + raw
+#   md <file.json>       Render ulang JSON menjadi Markdown
+#   yabs-parse <file>    Parse teks YABS menjadi JSON + Markdown
+#   bench-parse <file>   Parse teks bench.sh menjadi JSON + Markdown
+
+set -uo pipefail
+
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SELF_DIR/.." && pwd)"
+
+# shellcheck source=lib/bench_parse.sh
+. "$SELF_DIR/lib/bench_parse.sh"
+# shellcheck source=lib/bench_render.sh
+. "$SELF_DIR/lib/bench_render.sh"
+# shellcheck source=lib/astro_data.sh
+. "$SELF_DIR/lib/astro_data.sh"
+
+VPS_DATA_DIR="${VPS_DATA_DIR:-$ROOT_DIR/src/data/vps}"
+VPS_RAW_DIR="${VPS_RAW_DIR:-$ROOT_DIR/src/data/raw}"
+LEGACY_DIR="${LEGACY_DIR:-$ROOT_DIR/src/content/vps}"
+RESULT_DIR="${BENCH_RESULT_DIR:-$ROOT_DIR/bench-results}"
+
+YABS_FLAGS="${BENCH_EXPORT_YABS_FLAGS:--j}"
+SSH_OPTS="${BENCH_EXPORT_SSH_OPTS:--o BatchMode=yes -o ConnectTimeout=15}"
+
+START_WAKTU="$(date +%s)"
+
+die()  { printf 'Error: %s\n' "$1" >&2; exit "${2:-1}"; }
+info() { printf '\033[2m%s\033[0m\n' "$1" >&2; }
+warn() { printf '\033[33m%s\033[0m\n' "$1" >&2; }
+need() { command -v "$1" >/dev/null 2>&1 || die "butuh '$1' tapi tidak ditemukan."; }
+
+usage() {
+    cat <<'EOF'
+vps-bench - ekspor hasil benchmark VPS ke JSON + Markdown
+
+PERINTAH
+  yabs <host>          Jalankan YABS.sh di <host> lewat SSH
+  bench <host>         Jalankan bench.sh di <host> lewat SSH
+  import <slug>        Gabungkan hasil benchmark ke data Astro
+  migrate              Konversi data .md lama ke JSON + raw terpisah
+  md <file.json>       Render JSON menjadi Markdown
+  yabs-parse <file>    Parse teks YABS yang tersimpan
+  bench-parse <file>   Parse teks bench.sh yang tersimpan
+
+IMPORT
+  vps-bench import <slug> --yabs <file> [--benchsh <file>] [opsi meta]
+
+  --yabs <file>        Output mentah YABS
+  --benchsh <file>     Output mentah bench.sh
+  --title <teks>       Nama paket, mis. "Nevacloud NVMe Jakarta"
+  --provider <nama>    Nama provider; "Nama (Badan Usaha)" otomatis dipisah
+  --location <teks>    mis. "Jakarta, Indonesia"
+  --price <angka>      Harga bulanan
+  --currency <kode>    IDR | USD | AUD
+  --cpu-cores <n>      Jumlah core
+  --ram-gb <n>         RAM dalam GB
+  --storage-gb <n>     Penyimpanan dalam GB
+  --storage-type <s>   mis. NVMe
+  --bandwidth-tb <n>   Bandwidth dalam TB
+  --virtualization <s> KVM | LXC | docker
+  --status <s>         Available | Unavailable
+  --affiliate <url>    Link affiliate
+  --tag <teks>         Bisa diulang
+  -o <dir>             Folder keluaran JSON+MD mentah
+
+ENV
+  VPS_DATA_DIR   Folder data VPS   (default src/data/vps)
+  VPS_RAW_DIR    Folder raw        (default src/data/raw)
+  LEGACY_DIR     Folder .md lama  (default src/content/vps)
+
+CONTOH
+  vps-bench yabs vps-saya
+  vps-bench import nevacloud-nvme --yabs hasil-yabs.txt \
+      --provider "Nevacloud (PT Deneva)" --title "NVMe Jakarta 2" \
+      --price 90000 --currency IDR --cpu-cores 1 --ram-gb 1 \
+      --storage-gb 20 --storage-type NVMe --affiliate https://contoh.id
+  vps-bench migrate
+EOF
+}
+
+hex_siapkan_keluar() {
+    local label="$1" host="$2" stamp dir n=1
+    stamp="$(date '+%Y%m%d-%H%M%S')"
+    host="$(printf '%s' "$host" | tr -c 'A-Za-z0-9._-' '_')"
+    dir="$RESULT_DIR/$label/$host/$stamp"
+    while [[ -e "$dir" ]]; do
+        dir="$RESULT_DIR/$label/$host/$stamp-$n"
+        n=$((n + 1))
+    done
+    mkdir -p "$dir" || die "gagal membuat folder $dir"
+    printf '%s' "$dir"
+}
+
+hex_tampilkan_err() {
+    local f="$1" jml=3 line
+    [[ -s "$f" ]] || return 0
+    warn "pesan dari ssh:"
+    while IFS= read -r line; do
+        printf '    %s\n' "$line" >&2
+    done < <(tail -n "$jml" "$f")
+}
+
+hex_simpan() {
+    local dir="$1" nama="$2" raw="$3" json="$4" j m
+    j="$dir/$nama.json"
+    m="$dir/$nama.md"
+
+    jq -e . "$json" >/dev/null 2>&1 || { rm -f "$json"; die "JSON hasil tidak valid"; }
+    mv "$json" "$j"
+    hex_render_auto "$j" "$m" || die "gagal membuat Markdown"
+
+    printf '\n'
+    printf '  raw : %s\n' "$raw"
+    printf '  json: %s\n' "$j"
+    printf '  md  : %s\n' "$m"
+    printf '\n'
+}
+
+# Parse satu berkas mentah menjadi JSON di stdout.
+# hex_parse_ke_json <yabs|bench> <berkas_mentah>
+hex_parse_ke_json() {
+    local jenis="$1" f="$2" tmp out
+    tmp="$(mktemp "${TMPDIR:-/tmp}/vb.XXXXXX")"
+    out="$(mktemp "${TMPDIR:-/tmp}/vbj.XXXXXX")"
+    case "$jenis" in
+        yabs)
+            hex_ambil_json_yabs "$f" > "$out"
+            if [[ -s "$out" ]] && jq -e . "$out" >/dev/null 2>&1; then
+                jq '. + {schema:"yabs", source:"yabs-native-json"}' "$out"
+            else
+                hex_yabs_teks "$f" "$out" || die "parse YABS gagal"
+                cat "$out"
+            fi
+            ;;
+        bench)
+            hex_bench_teks "$f" "$out" || die "parse bench.sh gagal"
+            cat "$out"
+            ;;
+    esac
+    rm -f "$tmp" "$out"
+}
+
+# --- perintah -----------------------------------------------------------------
+
+cmd_yabs() {
+    local host="${1:-}"
+    [[ -n "$host" ]] || die "perlu nama host. Contoh: vps-bench yabs vps-saya"
+    need ssh; need jq
+    local dir raw
+    dir="$(hex_siapkan_keluar yabs "$host")"
+    raw="$dir/raw.txt"
+
+    info "menjalankan YABS.sh di $host (bisa 10-20 menit)..."
+    ssh $SSH_OPTS "$host" "curl -fsSL https://yabs.sh | bash -s -- $YABS_FLAGS" \
+        >"$raw" 2>"$dir/ssh.err"
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        warn "ssh keluar dengan kode $rc"
+        hex_tampilkan_err "$dir/ssh.err"
+        [[ -s "$raw" ]] || die "tidak ada output dari remote"
+    fi
+
+    local json="$dir/.result.json"
+    hex_ambil_json_yabs "$raw" >"$json"
+    if [[ -s "$json" ]]; then
+        jq '. + {schema:"yabs", source:"yabs-native-json"}' "$json" >"$json.t" \
+            && mv "$json.t" "$json"
+    else
+        hex_yabs_teks "$raw" "$json" || die "parse gagal"
+    fi
+    hex_simpan "$dir" "result" "$raw" "$json"
+    printf 'Langkah berikutnya:\n  vps-bench import <slug> --yabs %s\n\n' "$raw"
+}
+
+cmd_bench() {
+    local host="${1:-}"
+    [[ -n "$host" ]] || die "perlu nama host. Contoh: vps-bench bench vps-saya"
+    need ssh; need jq
+    local dir raw
+    dir="$(hex_siapkan_keluar bench "$host")"
+    raw="$dir/raw.txt"
+
+    info "menjalankan bench.sh di $host (bisa 10-15 menit)..."
+    ssh $SSH_OPTS "$host" "curl -fsSL https://bench.sh | bash" \
+        >"$raw" 2>"$dir/ssh.err"
+    local rc=$?
+    if [[ $rc -ne 0 ]]; then
+        warn "ssh keluar dengan kode $rc"
+        hex_tampilkan_err "$dir/ssh.err"
+        [[ -s "$raw" ]] || die "tidak ada output dari remote"
+    fi
+
+    local json="$dir/.result.json"
+    hex_bench_teks "$raw" "$json" || die "parse gagal"
+    hex_simpan "$dir" "result" "$raw" "$json"
+    printf 'Langkah berikutnya:\n  vps-bench import <slug> --benchsh %s\n\n' "$raw"
+}
+
+cmd_parse() {
+    local jenis="$1" f="${2:-}" dir json
+    [[ -f "$f" ]] || die "berkas tidak ditemukan: $f"
+    need jq
+    dir="$(hex_siapkan_keluar "$jenis" "$(basename "$f" .txt)")"
+    cp "$f" "$dir/raw.txt"
+    json="$dir/.result.json"
+    hex_parse_ke_json "$jenis" "$f" >"$json" || die "parse gagal"
+    hex_simpan "$dir" "result" "$dir/raw.txt" "$json"
+}
+
+cmd_md() {
+    local f="${1:-}"
+    [[ -f "$f" ]] || die "berkas tidak ditemukan: $f"
+    need jq
+    hex_render_auto "$f" "${f%.json}.md" || die "gagal render"
+    printf '%s\n' "${f%.json}.md"
+}
+
+# import: gabungkan hasil benchmark ke data Astro
+cmd_import() {
+    local slug=""
+    # Argumen pertama hanya slug kalau tidak diawali "--".
+    if [[ $# -gt 0 && "$1" != -* ]]; then
+        slug="$1"
+        shift
+    fi
+    [[ -n "$slug" ]] || die "perlu slug. Contoh: vps-bench import nevacloud-nvme --yabs f.txt"
+    need jq
+
+    local f_yabs="" f_bench=""
+    local v_title="" v_provider="" v_location="" v_currency="" v_stype=""
+    local v_virt="" v_status="" v_aff="" v_updated=""
+    local v_price="" v_cores="" v_ram="" v_storage="" v_bw=""
+    local v_tags="[]"
+
+    while [[ $# -gt 0 ]]; do
+        [[ $# -ge 2 ]] || die "opsi $1 butuh nilai"
+        case "$1" in
+            --yabs)        f_yabs="$2"; shift 2 ;;
+            --benchsh)     f_bench="$2"; shift 2 ;;
+            --title)       v_title="$2"; shift 2 ;;
+            --provider)    v_provider="$2"; shift 2 ;;
+            --location)    v_location="$2"; shift 2 ;;
+            --currency)    v_currency="$2"; shift 2 ;;
+            --storage-type) v_stype="$2"; shift 2 ;;
+            --virtualization) v_virt="$2"; shift 2 ;;
+            --status)      v_status="$2"; shift 2 ;;
+            --affiliate)   v_aff="$2"; shift 2 ;;
+            --last-updated) v_updated="$2"; shift 2 ;;
+            --price)       v_price="$2"; shift 2 ;;
+            --cpu-cores)   v_cores="$2"; shift 2 ;;
+            --ram-gb)      v_ram="$2"; shift 2 ;;
+            --storage-gb)  v_storage="$2"; shift 2 ;;
+            --bandwidth-tb) v_bw="$2"; shift 2 ;;
+            --tag)
+                # tag bisa diulang, ditumpuk lewat jq
+                v_tags="$(jq -n --argjson acc "$v_tags" --arg v "$2" '$acc + [$v]')"
+                shift 2 ;;
+            -h|--help)     usage; exit 0 ;;
+            *) die "opsi tidak dikenal: $1" ;;
+        esac
+    done
+
+    [[ -n "$f_yabs" || -n "$f_bench" ]] \
+        || die "beri minimal --yabs atau --benchsh"
+
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/vbimport.XXXXXX")"
+    local meta="$tmp/meta.json" jy="$tmp/yabs.json" jb="$tmp/bench.json"
+
+    # Semua opsi metadata dirangkum dalam satu panggilan jq. Pecah per-opsi
+    # dengan loop kata akan merusak nilai yang mengandung spasi.
+    jq -n \
+        --arg title "$v_title" --arg provider "$v_provider" \
+        --arg location "$v_location" --arg currency "$v_currency" \
+        --arg storage_type "$v_stype" --arg virtualization "$v_virt" \
+        --arg status "$v_status" --arg affiliate_link "$v_aff" \
+        --arg last_updated "$v_updated" \
+        --arg price "$v_price" --arg cores "$v_cores" --arg ram "$v_ram" \
+        --arg storage "$v_storage" --arg bw "$v_bw" \
+        --argjson tags "$v_tags" '
+        def s(x): if x == "" then null else x end;
+        def n(x): if x == "" then null else (x | tonumber? // x) end;
+        {
+          title: s($title), provider: s($provider), location: s($location),
+          currency: s($currency), storage_type: s($storage_type),
+          virtualization: s($virtualization), status: s($status),
+          affiliate_link: s($affiliate_link), last_updated: s($last_updated),
+          price_monthly: n($price), cpu_cores: n($cores), ram_gb: n($ram),
+          storage_gb: n($storage), bandwidth_tb: n($bw),
+          tags: $tags
+        }
+        | with_entries(select(.value != null))' > "$meta"
+
+    if [[ -n "$f_yabs" ]]; then
+        [[ -f "$f_yabs" ]] || die "berkas tidak ditemukan: $f_yabs"
+        hex_parse_ke_json yabs "$f_yabs" > "$jy"
+        mkdir -p "$VPS_RAW_DIR/$slug"
+        cp "$f_yabs" "$VPS_RAW_DIR/$slug/yabs.txt"
+    else
+        printf 'null' > "$jy"
+    fi
+
+    if [[ -n "$f_bench" ]]; then
+        [[ -f "$f_bench" ]] || die "berkas tidak ditemukan: $f_bench"
+        hex_parse_ke_json bench "$f_bench" > "$jb"
+        mkdir -p "$VPS_RAW_DIR/$slug"
+        cp "$f_bench" "$VPS_RAW_DIR/$slug/benchsh.txt"
+    else
+        printf 'null' > "$jb"
+    fi
+
+    local out
+    out="$(hex_tulis_vps "$slug" "$meta" "$jy" "$jb")"
+    rm -rf "$tmp"
+
+    printf '\n'
+    printf '  data : %s\n' "$out"
+    printf '  raw  : %s\n' "$VPS_RAW_DIR/$slug"
+    printf '\n'
+}
+
+# migrate: .md lama -> JSON + raw terpisah
+cmd_migrate() {
+    need jq
+    [[ -d "$LEGACY_DIR" ]] || die "tidak ada folder .md lama: $LEGACY_DIR"
+
+    local found=0 f slug tmp
+    for f in "$LEGACY_DIR"/*.md; do
+        [[ -f "$f" ]] || continue
+        found=1
+        slug="$(hex_slug "$(basename "$f" .md)")"
+        tmp="$(mktemp -d "${TMPDIR:-/tmp}/vbmig.XXXXXX")"
+
+        info "migrasi $slug"
+        hex_md_lama "$f" "$tmp/m" || { warn "gagal baca $f"; rm -rf "$tmp"; continue; }
+
+        local jy="$tmp/yabs.json" jb="$tmp/bench.json"
+        if [[ -s "$tmp/m.yabs.txt" ]]; then
+            hex_parse_ke_json yabs "$tmp/m.yabs.txt" > "$jy" || printf 'null' > "$jy"
+            mkdir -p "$VPS_RAW_DIR/$slug"
+            cp "$tmp/m.yabs.txt" "$VPS_RAW_DIR/$slug/yabs.txt"
+        else
+            printf 'null' > "$jy"
+        fi
+        if [[ -s "$tmp/m.benchsh.txt" ]]; then
+            hex_parse_ke_json bench "$tmp/m.benchsh.txt" > "$jb" || printf 'null' > "$jb"
+            mkdir -p "$VPS_RAW_DIR/$slug"
+            cp "$tmp/m.benchsh.txt" "$VPS_RAW_DIR/$slug/benchsh.txt"
+        else
+            printf 'null' > "$jb"
+        fi
+
+        hex_tulis_vps "$slug" "$tmp/m.meta.json" "$jy" "$jb" >/dev/null
+        rm -rf "$tmp"
+    done
+
+    if [[ $found -eq 0 ]]; then
+        die "tidak ada .md di $LEGACY_DIR"
+    fi
+
+    printf '\n'
+    printf '  data : %s\n' "$VPS_DATA_DIR"
+    printf '  raw  : %s\n' "$VPS_RAW_DIR"
+    printf '\n'
+    printf 'File .md lama masih ada di %s.\n' "$LEGACY_DIR"
+    printf 'Periksa dulu hasil migrasi, lalu hapus folder itu secara manual.\n\n'
+}
+
+main() {
+    local cmd="${1:-}"; shift 2>/dev/null || true
+    [[ -n "$cmd" ]] || { usage; exit 1; }
+
+    # -o diproses di sini supaya berlaku seragam untuk semua perintah,
+    # bukan hanya yang kebetulan menanganinya sendiri.
+    local args=() a
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o) [[ $# -ge 2 ]] || die "-o butuh nilai"
+                RESULT_DIR="$2"; shift 2 ;;
+            *) args+=("$1"); shift ;;
+        esac
+    done
+    set -- ${args[@]+"${args[@]}"}
+
+    case "$cmd" in
+        yabs)        cmd_yabs "$@" ;;
+        bench)       cmd_bench "$@" ;;
+        yabs-parse)  cmd_parse yabs "$@" ;;
+        bench-parse) cmd_parse bench "$@" ;;
+        import)      cmd_import "$@" ;;
+        migrate)     cmd_migrate "$@" ;;
+        md)          cmd_md "$@" ;;
+        -h|--help|help) usage ;;
+        *) printf 'Perintah tidak dikenal: %s\n\n' "$cmd" >&2; usage; exit 1 ;;
+    esac
+}
+
+main "$@"

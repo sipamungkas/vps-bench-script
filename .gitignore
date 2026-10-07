@@ -1,0 +1,5 @@
+# hasil benchmark lokal
+bench-results/
+
+# macOS
+.DS_Store
