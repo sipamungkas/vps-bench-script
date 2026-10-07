@@ -422,29 +422,81 @@ eq "tanpa --slug tetap jalan" "$?" "0"
 eq "tanpa --slug diperingatkan" "$(printf '%s' "$out" | grep -c 'tanpa --slug')" "1"
 
 # ---------------------------------------------------------------------------
-section "interaktif: host ditanyakan lewat /dev/tty"
-# stdin saat `curl | bash -s` berisi skripnya sendiri, jadi host harus dibaca
-# dari /dev/tty. Kalau tidak, `read` akan menelan sisa baris skrip.
-# Diuji lewat pty sungguhan supaya perilakunya sama dengan pemakaian nyata.
-eq "utilitas pty tersedia" "$(command -v script >/dev/null 2>&1 && echo ya || echo tidak)" "ya"
-if command -v script >/dev/null 2>&1; then
-    rm -rf "$WORK/ia2"
-    out="$( (printf 'root@127.0.0.1\n'; sleep 2) |
-        VBENCH_LIB_DIR="$ROOT/tools/lib" script -q /dev/null \
-            bash -c "cat \"$SA\" | bash -s -- --skip-yabs --skip-bench -o \"$WORK/ia2\"" \
-            2>&1 )"
-    # pty ikut mengecho ketikan, jadi yang dicek hanya prompt-nya muncul
-    eq "prompt tty tampil" "$(printf '%s' "$out" | grep -c 'alias ssh atau user@ip')" "1"
-    eq "slug jadi root-127.0.0.1" \
-        "$(ls "$WORK"/ia2/root-127.0.0.1/*/root-127.0.0.1.json 2>/dev/null | wc -l | tr -d ' ')" "1"
+section "jalur lokal: tanpa host, tanpa ssh"
+# Perintah utama dijalankan di dalam VPS-nya sendiri. Yang diuji: tidak ada
+# ssh yang dipanggil, dan slug diambil dari nama host mesin ini.
+#
+# --skip-yabs --skip-bench dipakai supaya test tidak benar-benar menjalankan
+# benchmark 20 menit di laptop yang menjalankan test.
+LOCAL_HOST="$(hostname 2>/dev/null | cut -d. -f1)"
+LOCAL_SLUG="$(printf '%s' "$LOCAL_HOST" | tr -c '[:alnum:].-' '-' | sed 's/-\{1,\}$//')"
+[[ -n "$LOCAL_SLUG" ]] || LOCAL_SLUG="vps-lokal"
 
-    # tanpa tty (cron/CI) harus gagal dengan pesan yang jelas, bukan hang
-    out="$(VBENCH_LIB_DIR="$ROOT/tools/lib" bash "$SA" -o "$WORK/ia3" </dev/null 2>&1)"
-    eq "tanpa tty gagal dengan pesan jelas" \
-        "$(printf '%s' "$out" | grep -c 'perlu nama host')" "1"
-    eq "tanpa tty tidak bocor error tty" \
-        "$(printf '%s' "$out" | grep -c 'Device not configured')" "0"
-fi
+rm -rf "$WORK/lokal"
+out="$(VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --skip-yabs --skip-bench \
+        --slug "$LOCAL_SLUG" -o "$WORK/lokal" 2>&1)"
+eq "jalur lokal jalan tanpa argumen host" "$?" "0"
+eq "folder lokal terbentuk" \
+    "$(ls "$WORK"/lokal/"$LOCAL_SLUG"/*/"$LOCAL_SLUG".json 2>/dev/null | wc -l | tr -d ' ')" "1"
+eq "md lokal terbentuk" \
+    "$(ls "$WORK"/lokal/"$LOCAL_SLUG"/*/"$LOCAL_SLUG".md 2>/dev/null | wc -l | tr -d ' ')" "1"
+eq "tidak ada ssh di jalur lokal" "$(printf '%s' "$out" | grep -c 'ssh')" "0"
+eq "kedua benchmark disebut dilewati" "$(printf '%s' "$out" | grep -c 'dilewati')" "2"
+eq "sarannya pakai scp dari VPS" "$(printf '%s' "$out" | grep -c 'scp -r')" "1"
+
+# Jalur lokal harus benar-benar memanggil YABS/bench.sh di mesin ini, bukan
+# lewat ssh. Diuji dengan `curl` palsu di PATH yang mengeluarkan fixture,
+# jadi test jalan dalam hitungan detik.
+mkdir -p "$WORK/fakebin"
+cat > "$WORK/fakebin/curl" <<'FAKE'
+#!/usr/bin/env bash
+# Menggantikan YABS.sh dan bench.sh yang diunduh lalu dieksekusi dengan
+# `bash -s`. Jadi yang dicetak bukan fixture-nya langsung, tapi skrip yang
+# mencetaknya - dengan begitu alur unduh | bash benar-benar teruji.
+for a in "$@"; do
+    case "$a" in
+        https://yabs.sh)  printf 'cat %s\n'  "$FAKE_YABS";  exit 0 ;;
+        https://bench.sh) printf 'cat %s\n'  "$FAKE_BENCH"; exit 0 ;;
+    esac
+done
+exit 1
+FAKE
+chmod +x "$WORK/fakebin/curl"
+
+rm -rf "$WORK/lokal3"
+out="$(FAKE_YABS="$TESTS_DIR/fixture-yabs.txt" \
+       FAKE_BENCH="$TESTS_DIR/fixture-bench.txt" \
+       PATH="$WORK/fakebin:$PATH" \
+       VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --slug lokal-palsu \
+       -o "$WORK/lokal3" 2>&1)"
+eq "jalur lokal menjalankan YABS" "$(printf '%s' "$out" | grep -c 'YABS.sh di mesin ini')" "1"
+eq "jalur lokal menjalankan bench.sh" "$(printf '%s' "$out" | grep -c 'bench.sh di mesin ini')" "1"
+eq "hasil YABS lokal terparse" \
+    "$(jq -r '.benchmarks.yabs.geekbench | length' "$WORK"/lokal3/lokal-palsu/*/lokal-palsu.json 2>/dev/null)" "1"
+eq "hasil speedtest lokal terparse" \
+    "$(jq -r '.benchmarks.benchsh.speedtest | length' "$WORK"/lokal3/lokal-palsu/*/lokal-palsu.json 2>/dev/null)" "10"
+eq "md lokal memuat iperf3" \
+    "$(grep -c 'iPerf | Warsaw, Poland (10G)' "$WORK"/lokal3/lokal-palsu/*/lokal-palsu.md 2>/dev/null)" "1"
+eq "md lokal memuat speedtest" \
+    "$(grep -c '| Los Angeles, US |' "$WORK"/lokal3/lokal-palsu/*/lokal-palsu.md 2>/dev/null)" "1"
+
+# slug otomatis dari nama host, tanpa --slug
+rm -rf "$WORK/lokal2"
+out="$(VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --skip-yabs --skip-bench \
+        -o "$WORK/lokal2" 2>&1)"
+eq "slug diturunkan dari nama host" \
+    "$(ls "$WORK"/lokal2/"$LOCAL_SLUG"/*/"$LOCAL_SLUG".json 2>/dev/null | wc -l | tr -d ' ')" "1"
+
+# jalur ssh tetap ada: menyebut host sebagai argumen lewat ssh
+rm -rf "$WORK/remote"
+out="$(BENCH_EXPORT_SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=5" \
+        VBENCH_LIB_DIR="$ROOT/tools/lib" "$SA" --slug via-ssh \
+        -o "$WORK/remote" host-tidak-ada-xyz-abc123 2>&1)"
+# YABS gagal duluan, jadi hanya satu yang sempat disebut sebelum berhenti
+eq "jalur ssh dipakai kalau host disebut" "$(printf '%s' "$out" | grep -c 'lewat ssh')" "1"
+eq "ssh gagal ditangani" "$(printf '%s' "$out" | grep -c 'Could not resolve hostname\|Connection refused\|Permission denied')" "1"
+eq "tidak ada JSON palsu dari ssh gagal" \
+    "$(ls "$WORK"/remote/via-ssh/*/via-ssh.json 2>/dev/null | wc -l | tr -d ' ')" "0"
 
 # ---------------------------------------------------------------------------
 section "folder keluaran tidak saling menimpa"

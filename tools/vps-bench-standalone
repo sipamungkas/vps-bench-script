@@ -2,14 +2,16 @@
 # vps-bench-standalone - jalankan benchmark VPS dari mana saja, lalu tulis
 # JSON + Markdown yang siap disalin ke repo.
 #
-# Dirancang untuk dipanggil tanpa clone repo, tanpa flag, dan tanpa clone:
+# Jalankan skrip ini DI DALAM VPS yang mau dibenchmark. Tidak ada ssh, tidak
+# ada flag, tidak ada pertanyaan:
 #
-#   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-#     | bash -s
+#   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone | bash -s
 #
-# Skrip menanyakan nama host lewat /dev/tty, lalu menurunkannya jadi slug.
 # Metadata paket (harga, lokasi, provider, affiliate, tag) sengaja tidak
 # diminta di perintah. Hasilnya tetap valid; kolomnya kosong untuk diisi manual.
+#
+# Kalau mau benchmark mesin lain dari laptop, sebut host-nya:
+#   curl -fsSL <url> | bash -s -- user@ip
 #
 # Keluarannya:
 #   stdout  ringkasan singkat + lokasi berkas
@@ -49,20 +51,19 @@ usage() {
 vps-bench-standalone - benchmark VPS lalu tulis JSON + Markdown
 
 PAKAI
-  curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
-    | bash -s
+  curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone | bash -s
 
-  Lalu skrip menanyakan nama host. Selesai - tanpa flag apa pun.
-  Nama slug diturunkan dari host (root@103.28.14.52 -> root-103.28.14.52),
-  nama metadata (harga, lokasi, provider, link, tag) sengaja tidak ada di
-  perintah: semua kolom kosong, nanti diisi manual di JSON.
+  Jalankan perintah itu DI DALAM VPS yang mau dibenchmark. Tidak ada flag,
+  tidak ada pertanyaan. Slug diturunkan dari nama host mesin ini; metadata
+  paket (harga, lokasi, provider, link, tag) sengaja tidak ada di perintah:
+  semua kolom kosong, nanti diisi manual di JSON.
 
-  Kalau tidak mau ditanyakan, host boleh ditulis sebagai argumen:
+  Kalau mau benchmark mesin lain dari laptop, sebut host-nya:
     curl -fsSL <url> | bash -s -- vps-saya
 
 YANG DIJALANKAN
-  <host>  YABS.sh  lalu  bench.sh, berurutan. Total 20-35 menit.
-          Paket akan ikut terunduh di server, jadi butuh curl + bash di sana.
+  YABS.sh lalu bench.sh, berurutan, di mesin ini. Total 20-35 menit.
+  Paket akan ikut terunduh, jadi butuh curl + bash di server.
 
 KELUARAN
   ./bench-results/<slug>/<stempel>/
@@ -86,16 +87,21 @@ METADATA OPSIONAL
   VBENCH_VIRTUALIZATION VBENCH_STATUS VBENCH_AFFILIATE VBENCH_LAST_UPDATED
 
 LAIN
-  -o <dir>            Folder keluaran (default ./bench-results)
-  --skip-yabs         Jangan jalankan YABS.sh
-  --skip-bench        Jangan jalankan bench.sh
-  --only-parse <dir>  Lewati SSH, pakai file mentah yang sudah ada
-  -h, --help          Bantuan ini
+  <host>               Nama host sebagai argumen = jalankan lewat ssh ke sana.
+                      Kosongkan = jalankan di mesin ini (default).
+  --skip-yabs          Jangan jalankan YABS.sh
+  --skip-bench         Jangan jalankan bench.sh
+  --only-parse <dir>   Pakai file mentah yang sudah ada, tanpa menjalankan apa pun
+  -o <dir>             Folder keluaran (default ./bench-results)
+  -h, --help           Bantuan ini
 
 SETELAH SELESAI
-  cp <slug>.json  src/data/vps/
-  mkdir -p src/data/raw/<slug> && cp yabs.txt benchsh.txt src/data/raw/<slug>/
-  pnpm build
+  Berkanya masih di VPS. Ambil dulu dari laptop:
+    scp -r <folder-hasil> .
+  Lalu salin ke repo dan build:
+    cp <slug>.json  src/data/vps/
+    mkdir -p src/data/raw/<slug> && cp yabs.txt benchsh.txt src/data/raw/<slug>/
+    pnpm build
 EOF
 }
 
@@ -170,46 +176,28 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Tanya lewat terminal, bukan stdin. Kalau skrip dipanggil dengan
-# `curl ... | bash -s`, stdin berisi skripnya sendiri, jadi `read` dari stdin
-# bisa menelan sisa baris skrip dan berhenti sebelum apa pun dijalankan.
-hex_tanya() {
-    local prompt="$1" jawab=""
-    # `[[ -r /dev/tty ]]` benar tapi Device not configured tetap bisa terjadi
-    # (mis. cron, CI, atau pipeline yang tidak punya terminal), jadi error-nya
-    # ditahan. Tanpa itu, dua baris "Device not configured" bocor ke stderr
-    # sebelum pesan errornya sendiri.
-    if { : >/dev/tty; } 2>/dev/null; then
-        printf '%s' "$prompt" >/dev/tty 2>/dev/null || return 0
-        IFS= read -r jawab </dev/tty 2>/dev/null || true
-    fi
-    printf '%s' "$jawab"
-}
-
-# Perintah tanpa argumen sama sekali harus tetap bisa jalan, jadi host
-# ditanyakan di terminal dan slug diturunkan dari host itu.
-if [[ -z "$host" && -z "$parse_only" ]]; then
-    host="$(hex_tanya '  host (alias ssh atau user@ip): ')"
-    [[ -n "$host" ]] || die "perlu nama host, tapi tidak terbaca dari terminal.
-       Kalau terminal tidak interaktif, tulis host-nya sebagai argumen:
-       curl -fsSL <url> | bash -s -- user@ip"
-    # sisa spasi dari prompt bisa ikut terbaca kalau user-nya malas menekan
-    # spasi sebelum mengetik nama host
-    host="${host#"${host%%[![:space:]]*}"}"
-    host="${host%"${host##*[![:space:]]}"}"
-fi
-
 need jq
 need curl
-[[ -n "$host" || -n "$parse_only" ]] || die "perlu <host> atau --only-parse <dir>"
 
-# Slug boleh dikosongkan: nama berkas jadi vps-yang-diuji (<stempel>) supaya skrip
-# tetap jalan tanpa metadata. Nama yang rapi tetap lebih enak ditulis manual.
+# Tanpa argumen, skrip dijalankan di mesin ini. Itu jalur yang dipakai di VPS:
+# skrip di-curl ke dalam server lalu dieksekusi di sana, jadi tidak ada ssh
+# sama sekali. Host sebagai argumen tetap ada untuk benchmark mesin lain.
+# -1 = lokal (default), 0 = pakai ssh
+if [[ -n "$host" ]]; then
+    mode_ssh=1
+else
+    mode_ssh=0
+fi
+
+# Slug boleh kosong. Di jalur lokal slug diambil dari nama host mesin ini,
+# di jalur ssh dari nama host tujuan. Nama yang rapi tetap lebih enak ditulis
+# manual, tapi skrip tidak boleh gagal hanya gara-gara itu.
 if [[ -z "$slug" ]]; then
-    if [[ -n "$host" ]]; then
+    if [[ $mode_ssh -eq 1 ]]; then
         slug="$(printf '%s' "$host" | tr -c '[:alnum:].-' '-' | sed 's/-\{1,\}$//')"
     else
-        slug="vps"
+        slug="$(hostname 2>/dev/null | cut -d. -f1)"
+        [[ -n "$slug" ]] || slug="vps-lokal"
     fi
     warn "tanpa --slug, pakai '$slug'. ganti namanya kalau perlu."
 fi
@@ -255,7 +243,9 @@ if [[ -n "$parse_only" ]]; then
     info "mode --only-parse: membaca $parse_src"
 else
     OUT_DIR="$OUT_DIR/$slug/$(date '+%Y%m%d-%H%M%S')"
-    need ssh
+    # Jalur lokal tidak butuh ssh sama sekali. Menurut needssh di sini akan
+    # menggagalkan VPS yang memang tidak punya ssh - justru kasus utama.
+    [[ $mode_ssh -eq 1 ]] && need ssh
 fi
 
 mkdir -p "$OUT_DIR" || die "gagal membuat $OUT_DIR"
@@ -266,10 +256,35 @@ f_bench="$OUT_DIR/benchsh.txt"
 hex_tampilkan_err() {
     local f="$1" jml=3 line
     [[ -s "$f" ]] || return 0
-    warn "pesan dari ssh:"
+    warn "pesan dari benchmark:"
     while IFS= read -r line; do
         printf '    %s\n' "$line" >&2
     done < <(tail -n "$jml" "$f")
+}
+
+# Satu tempat untuk menjalankan skrip benchmark, lokal maupun lewat ssh, supaya
+# 둘nya tidak bisa berbeda diam-diam. Perbedaannya cuma di cara memanggilnya.
+# hex_jalankan <nama> <perintah> <keluaran> <log_error> <pesan_gagal>
+hex_jalankan() {
+    local nama="$1" perintah="$2" keluar="$3" logerr="$4" pesan="$5" rc
+
+    if [[ $mode_ssh -eq 1 ]]; then
+        ssh $SSH_OPTS "$host" "$perintah" >"$keluar" 2>"$logerr"
+    else
+        eval "$perintah" >"$keluar" 2>"$logerr"
+    fi
+    rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        if [[ $mode_ssh -eq 1 ]]; then
+            warn "ssh keluar dengan kode $rc"
+        else
+            warn "$nama keluar dengan kode $rc"
+        fi
+        hex_tampilkan_err "$logerr"
+        [[ -s "$keluar" ]] || die "$pesan"
+    fi
+    [[ -s "$keluar" ]] || die "$pesan"
 }
 
 # --- jalankan test -----------------------------------------------------------
@@ -288,31 +303,25 @@ if [[ -n "$parse_src" ]]; then
 fi
 
 if [[ $skip_yabs -eq 0 && -z "$parse_src" ]]; then
-    info "[1/2] YABS.sh di $host (10-20 menit)..."
-    ssh $SSH_OPTS "$host" "curl -fsSL https://yabs.sh | bash -s -- $YABS_FLAGS" \
-        >"$f_yabs" 2>"$OUT_DIR/yabs.err"
-    rc=$?
-    if [[ $rc -ne 0 ]]; then
-        warn "ssh keluar dengan kode $rc"
-        hex_tampilkan_err "$OUT_DIR/yabs.err"
-        [[ -s "$f_yabs" ]] || die "tidak ada output YABS dari remote"
+    if [[ $mode_ssh -eq 1 ]]; then
+        info "[1/2] YABS.sh di $host lewat ssh (10-20 menit)..."
+    else
+        info "[1/2] YABS.sh di mesin ini (10-20 menit)..."
     fi
-    [[ -s "$f_yabs" ]] || die "output YABS kosong"
+    hex_jalankan "YABS" "curl -fsSL https://yabs.sh | bash -s -- $YABS_FLAGS" \
+        "$f_yabs" "$OUT_DIR/yabs.err" "tidak ada output YABS"
 else
     info "[1/2] YABS dilewati"
 fi
 
 if [[ $skip_bench -eq 0 && -z "$parse_src" ]]; then
-    info "[2/2] bench.sh di $host (10-15 menit)..."
-    ssh $SSH_OPTS "$host" "curl -fsSL https://bench.sh | bash" \
-        >"$f_bench" 2>"$OUT_DIR/bench.err"
-    rc=$?
-    if [[ $rc -ne 0 ]]; then
-        warn "ssh keluar dengan kode $rc"
-        hex_tampilkan_err "$OUT_DIR/bench.err"
-        [[ -s "$f_bench" ]] || die "tidak ada output bench.sh dari remote"
+    if [[ $mode_ssh -eq 1 ]]; then
+        info "[2/2] bench.sh di $host lewat ssh (10-15 menit)..."
+    else
+        info "[2/2] bench.sh di mesin ini (10-15 menit)..."
     fi
-    [[ -s "$f_bench" ]] || die "output bench.sh kosong"
+    hex_jalankan "bench.sh" "curl -fsSL https://bench.sh | bash" \
+        "$f_bench" "$OUT_DIR/bench.err" "tidak ada output bench.sh"
 else
     info "[2/2] bench.sh dilewati"
 fi
@@ -407,7 +416,17 @@ printf '  json : %s\n' "$out_json" >&2
 printf '  md   : %s\n' "$out_md" >&2
 printf '  raw  : %s\n' "$OUT_DIR" >&2
 printf '\n' >&2
-printf '  Salin manual ke repo:\n' >&2
+
+if [[ $mode_ssh -eq 1 ]]; then
+    printf '  Salin manual ke repo:\n' >&2
+else
+    # Jalur lokal: berkasnya masih di VPS, jadi cara mengambilnya beda.
+    printf '  Ambil dari laptop:\n' >&2
+    printf '    scp -r %s .\n' "$OUT_DIR" >&2
+    printf '\n' >&2
+    printf '  Lalu di repo, salin manual:\n' >&2
+fi
+
 printf '    cp %s/%s.json  src/data/vps/\n' "$OUT_DIR" "$slug" >&2
 if [[ -s "$OUT_DIR/yabs.txt" ]]; then
     printf '    mkdir -p src/data/raw/%s\n' "$slug" >&2

@@ -10,21 +10,19 @@ pada repo situs. Isi `tools/` dan `tests/` di sini identik dengan yang ada di
 
 ## Mulai cepat
 
-Jalankan YABS.sh lalu bench.sh di satu host, dan dapatkan JSON + laporan
-Markdown. Tidak perlu clone repo, tidak perlu flag:
+Masuk ke VPS-nya, lalu jalankan satu perintah ini. Tidak ada flag, tidak ada
+pertanyaan, tidak ada ssh:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone | bash -s
 ```
 
-Skrip menanyakan nama host, lalu menurunkannya jadi slug
-(`root@103.28.14.52` → `root-103.28.14.52`). Nama metadata paket (harga,
-lokasi, provider, link affiliate, tag) sengaja tidak ada di mana pun —
-kolomnya kosong di JSON, diisi manual nanti. Hasil benchmark-nya sendiri
-sudah lengkap.
+Jalankan YABS.sh lalu bench.sh di mesin itu sendiri, lalu tulis JSON +
+laporan Markdown. Slug diturunkan dari nama host VPS, dan metadata paket
+(harga, lokasi, provider, link affiliate, tag) sengaja tidak ada di mana
+pun — kolomnya kosong di JSON, diisi manual nanti.
 
-Butuh di komputer lokal: `bash`, `jq`, `curl`, `ssh`.
-Butuh di server: `curl` dan `bash` (YABS.sh mengunduh dependensinya sendiri).
+Butuh di VPS: `bash`, `jq`, `curl`. (`ssh` tidak dipakai sama sekali.)
 
 Total 20-35 menit. Jalankan YABS.sh lebih dulu, baru bench.sh, supaya keduanya
 tidak saling berebut CPU dan skewanya mengacaukan angka.
@@ -37,15 +35,21 @@ tidak saling berebut CPU dan skewanya mengacaukan angka.
 | `./bench-results/<slug>/<stempel>/<slug>.md` | laporan gabungan: paket, ringkasan, YABS (termasuk iperf3), bench.sh (termasuk speedtest.net) |
 | `./bench-results/<slug>/<stempel>/yabs.txt` `benchsh.txt` | output mentah |
 | stdout | ringkasan singkat + lokasi berkas |
-| stderr | progres dan perintah `cp` siap pakai |
+| stderr | progres dan perintah siap pakai |
 
 stdout sengaja bukan JSON, supaya tidak pernah ter-redirect ke `.json` berisi
-teks. Repo `astro-vps-bench` yang aktif juga tidak pernah disentuh:
+teks. Berkanya masih ada di VPS, jadi ambil dulu dari laptop:
 
 ```bash
-cp bench-results/<slug>/<stempel>/<slug>.json  src/data/vps/
+scp -r root@<vps>:~/bench-results/<slug>/<stempel> .
+```
+
+Lalu di repo `astro-vps-bench`:
+
+```bash
+cp <stempel>/<slug>.json  src/data/vps/
 mkdir -p src/data/raw/<slug>
-cp bench-results/<slug>/<stempel>/{yabs,benchsh}.txt src/data/raw/<slug>/
+cp <stempel>/{yabs,benchsh}.txt src/data/raw/<slug>/
 pnpm build
 ```
 
@@ -54,16 +58,18 @@ Kalau metadata memang mau diisi sekalian lewat perintah, flag-nya tetap ada
 
 ## Opsi
 
-Host ditulis sebagai argumen kalau tidak mau ditanyakan:
+Host ditulis sebagai argumen kalau mau benchmark mesin lain dari laptop —
+itu satu-satunya jalur yang pakai ssh:
 
 ```bash
-curl -fsSL <url> | bash -s -- vps-saya
+curl -fsSL <url> | bash -s -- user@ip
 ```
 
 | Opsi | Fungsi |
 |---|---|
+| `<host>` | Jalankan lewat ssh ke host itu. Kosongkan = jalan di mesin ini |
 | `--slug <s>` | Nama file JSON. Kalau kosong, diturunkan dari nama host |
-| `--only-parse <dir>` | Pakai berkas mentah yang sudah ada, tanpa SSH |
+| `--only-parse <dir>` | Pakai berkas mentah yang sudah ada, tanpa menjalankan apa pun |
 | `--skip-yabs` / `--skip-bench` | Jangan jalankan salah satunya |
 | `-o <dir>` | Folder keluaran (default `./bench-results`) |
 
@@ -84,8 +90,9 @@ Kalau output mentahnya sudah ada di komputer lokal, tidak perlu SSH lagi:
 
 ## Kenapa parser-nya tidak ditulis ulang di skrip standalone
 
-`tools/vps-bench-standalone` mengunduh `tools/lib/bench_parse.sh` dan
-`tools/lib/astro_data.sh` dari repo ini lalu mem-`-source`-nya, bukan
+`tools/vps-bench-standalone` mengunduh `tools/lib/bench_parse.sh`,
+`tools/lib/astro_data.sh`, dan `tools/lib/bench_render.sh` dari repo ini lalu
+mem-`-source`-nya, bukan
 menyalin logika jq-nya. Alasannya hanya ada satu implementasi parser.
 
 Dua salinan akan bebas berbeda secara diam-diam, dan parser yang diam-diam
@@ -101,14 +108,17 @@ VBENCH_LIB_DIR=tools/lib ./tools/vps-bench-standalone ...
 
 Ganti target repo/ref dengan `VBENCH_REPO` dan `VBENCH_REF`.
 
-## Kalau tidak bisa lewat SSH
+## Kalau output mentahnya sudah ada di tangan
 
-Kirim skrip ke server, ambil hasilnya, lalu parse di lokal:
+Tidak perlu menjalankan benchmark lagi, cukup parse yang ada:
 
 ```bash
 ./tools/vps-bench import slug-vps --yabs hasil-yabs.txt
 ./tools/vps-bench yabs-parse hasil-yabs.txt -o /tmp/cek   # JSON + Markdown
 ```
+
+Opsi `--only-parse` pada skrip standalone melakukan hal yang sama sekaligus
+menulis `<slug>.json` dan `<slug>.md` dalam format yang siap dipakai.
 
 ## Perintah lengkap
 
@@ -136,7 +146,7 @@ tools/vps-bench-standalone    Entry point untuk curl | bash
 tools/lib/bench_parse.sh      Parser YABS.sh dan bench.sh
 tools/lib/astro_data.sh       Menyusun JSON sumber data situs
 tools/lib/bench_render.sh     Render JSON menjadi Markdown (incl. laporan gabungan VPS)
-tests/run_tests.sh            193 regression test
+tests/run_tests.sh            204 regression test
 tests/fixture-*               Contoh output asli, untuk menangkap regresi format lama
 ```
 
@@ -146,7 +156,7 @@ tests/fixture-*               Contoh output asli, untuk menangkap regresi format
 bash tests/run_tests.sh
 ```
 
-193 assertion, tidak perlu akses server maupun menjalankan Astro. Fixture
+204 assertion, tidak perlu akses server maupun menjalankan Astro. Fixture
 `tests/fixture-*-legacy.txt` berasal dari output **nyata** VPS supaya regresi
 format lama (v2024/v2025) langsung ketahuan — nama label, satuan, dan format
 IOPS di script itu berubah beberapa kali.
@@ -169,5 +179,6 @@ membuat data hilang **tanpa indication apa pun**:
    string literal `\1`, yang gagal saat dikonversi ke angka. Untuk mengambil
    angka dari `"1.20 Gbits/sec"`, pakai `split(" ")` plus `tonumber`.
 
-Butuh hanya `bash`, `jq`, `ssh`, `curl`. `bash 3.2` (default macOS) sudah
-cukup. Tanpa dependensi Node atau Python.
+Butuh hanya `bash`, `jq`, dan `curl` — `ssh` hanya kalau host-nya ditulis
+sebagai argumen. `bash 3.2` (default macOS) sudah cukup. Tanpa dependensi Node
+atau Python.
