@@ -4,7 +4,7 @@
 #
 # Dirancang untuk dipanggil tanpa clone repo:
 #
-#   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/vps-bench-standalone \
+#   curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
 #     | bash -s -- <host> --slug <slug> --title <judul> --provider <nama> [opsi]
 #
 # Keluarannya:
@@ -42,7 +42,7 @@ usage() {
 vps-bench-standalone - benchmark VPS lalu cetak JSON siap-import
 
 PAKAI
-  curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/vps-bench-standalone \
+  curl -fsSL https://raw.githubusercontent.com/sipamungkas/vps-bench-script/main/tools/vps-bench-standalone \
     | bash -s -- <host> --slug <slug> --title <judul> [opsi]
 
 YANG DIJALANKAN
